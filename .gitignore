@@ -20,6 +20,7 @@ dist-old-build
 scripts/.appid-audit.json
 scripts/.steamAppIds.generated.ts
 # 验收截图与探针临时目录
+docs/portfolio-online/
 .shot-*.png
 .slice-*.png
 .band-*.png
