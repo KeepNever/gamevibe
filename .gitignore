@@ -1,0 +1,60 @@
+# 环境变量（含密钥，禁止提交）
+.env
+.env.local
+.env.*.local
+
+# 依赖与构建产物
+node_modules
+dist
+dist-ssr
+# 构建时用的中转目录（见 scripts/syncDist.mjs 的说明）与封面解析缓存
+dist-new
+dist-next
+dist-old-build
+.build-out
+.cover-cache.json
+.cover-plan.json
+.ps-covers.json
+.stale.txt
+# appid 审计的中转产物（见 scripts/auditSteamAppIds.mjs / genSteamAppIds.mjs，可随时重跑生成）
+scripts/.appid-audit.json
+scripts/.steamAppIds.generated.ts
+# 验收截图与探针临时目录
+.shot-*.png
+.slice-*.png
+.band-*.png
+.probe/
+.tmp/
+*.local
+
+# 出网/探针脚本丢出来的临时结果（随时重跑可再生成）
+.tmp_*.json
+.stale-assets.txt
+build.log
+
+# 运行时 SQLite 数据文件（表结构由 server/db/schema.ts 启动时自动建，
+# 演示数据用 scripts/seedReviews.mjs + scripts/seedSocial.mjs 播种）
+gamevibe.db
+gamevibe.db-shm
+gamevibe.db-wal
+server/db/data/
+
+# 日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 一次性脚本的备份副本
+*.bak

@@ -1,0 +1,120 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-gaming-50: #f0f4ff;
+  --color-gaming-100: #dbe4ff;
+  --color-gaming-200: #bac8ff;
+  --color-gaming-300: #91a7ff;
+  --color-gaming-400: #748ffc;
+  --color-gaming-500: #5c7cfa;
+  --color-gaming-600: #4c6ef5;
+  --color-gaming-700: #4263eb;
+  --color-gaming-800: #3b5bdb;
+  --color-gaming-900: #364fc7;
+
+  --color-neon: #a78bfa;
+  --color-neon-glow: rgba(167, 139, 250, 0.4);
+
+  /* ===== 主色：紫 ===== */
+  --color-accent: #a78bfa;
+  --color-accent-strong: #8b5cf6;
+
+  /* ===== 辅助色：青(数据) / 粉(直播热度) / 琥珀(折扣排行) / 绿(好评免费) / 蓝(在线Steam) / 红(危险) ===== */
+  --color-accent-cyan: #22d3ee;
+  --color-accent-pink: #f472b6;
+  --color-accent-amber: #fbbf24;
+  --color-accent-green: #34d399;
+  --color-accent-blue: #60a5fa;
+  --color-accent-red: #fb7185;
+
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ===== 主题变量（暗色为默认） ===== */
+:root {
+  --bg: #0a0a0f;
+  --surface: #0d0d14;
+  --surface-2: #16161f;
+  --surface-3: #1c1c26;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #e4e4e7;
+  --text-dim: #a1a1aa;
+  --text-faint: #71717a;
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.12);
+  --accent-border: rgba(167, 139, 250, 0.3);
+}
+
+/* ===== 亮色主题 ===== */
+:root:not(.dark),
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --surface-3: #f0f0f1;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-dim: #52525b;
+  --text-faint: #a1a1aa;
+  --accent: #7c3aed;
+  --accent-soft: rgba(124, 58, 237, 0.1);
+  --accent-border: rgba(124, 58, 237, 0.25);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* ===== 骨架屏流光 ===== */
+.shimmer {
+  background: linear-gradient(100deg, var(--surface-2) 30%, var(--surface-3) 50%, var(--surface-2) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ===== 通用：封面浮动光斑 ===== */
+.float-glow {
+  animation: floatGlow 6s ease-in-out infinite;
+}
+@keyframes floatGlow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}

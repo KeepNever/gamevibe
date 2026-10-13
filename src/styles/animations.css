@@ -1,0 +1,180 @@
+/**
+ * 纯 CSS 动画工具类（替代 framer-motion）
+ *
+ * 所有动画通过 CSS transition/animation 实现，零 JS DOM 操作，
+ * 完全兼容 React 19 的严格 DOM 所有权模型。
+ *
+ * 用法：
+ *   <div className="fade-in-up">...</div>        // 上浮淡入
+ *   <div className="fade-in scale-in">...</div>   // 缩放+淡入组合
+ *   <div className="stagger-grid">...</div>       // 交错入场容器
+ */
+
+/* ===== 入场动画 ===== */
+.fade-in-up {
+  animation: fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+
+.fade-in-left {
+  animation: fadeInLeft 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.slide-in-right {
+  animation: slideInRight 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ===== 关键帧 ===== */
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUpShort {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUpMini {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-100%); }
+}
+
+/* ===== 交错入场（替代 MotionGrid stagger） ===== */
+.stagger-grid {
+  --stagger-base: 0ms;
+}
+
+.stagger-grid > * {
+  opacity: 0;
+  animation: staggerItem 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--stagger-base) * var(--stagger-i, 0));
+}
+.stagger-grid > *:nth-child(1) { --stagger-i: 0; }
+.stagger-grid > *:nth-child(2) { --stagger-i: 1; }
+.stagger-grid > *:nth-child(3) { --stagger-i: 2; }
+.stagger-grid > *:nth-child(4) { --stagger-i: 3; }
+.stagger-grid > *:nth-child(5) { --stagger-i: 4; }
+.stagger-grid > *:nth-child(6) { --stagger-i: 5; }
+.stagger-grid > *:nth-child(7) { --stagger-i: 6; }
+.stagger-grid > *:nth-child(8) { --stagger-i: 7; }
+.stagger-grid > *:nth-child(9) { --stagger-i: 8; }
+.stagger-grid > *:nth-child(10) { --stagger-i: 9; }
+.stagger-grid > *:nth-child(11) { --stagger-i: 10; }
+.stagger-grid > *:nth-child(12) { --stagger-i: 11; }
+
+@keyframes staggerItem {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ===== 滚动触发（配合 useInView hook 使用） ===== */
+.viewport-hidden {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.viewport-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===== 侧边栏滑入/滑出 ===== */
+.sidebar-enter {
+  animation: slideInRight 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sidebar-exit {
+  animation: slideOutLeft 0.25s ease-in forwards;
+}
+
+/* ===== Hero 区域短距离动画 ===== */
+.hero-badge-enter {
+  animation: fadeInUpShort 0.5s ease-out both;
+}
+
+/* ===== 页面切换方向滑动 ===== */
+.slide-h-enter-from-right {
+  animation: slideHFromRight 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.slide-h-enter-from-left {
+  animation: slideHFromLeft 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes slideHFromRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideHFromLeft {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ===== 进度条填充动画（Wrapped 年报） ===== */
+.progress-bar-fill {
+  width: 0;
+  animation: progressFill 0.9s ease-out calc(0.2s + var(--bar-delay, 0s)) both;
+}
+
+@keyframes progressFill {
+  to { width: var(--target-width, 100%); }
+}
+
+/* ===== 弹性缩放（Wrapped 人格 emoji） ===== */
+.scale-in-spring {
+  animation: springScale 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+}
+
+@keyframes springScale {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ===== 卡片 3D 悬停（GameCard，替代 useMotionValue） ===== */
+.card-3d-hover {
+  perspective: 1000px;
+}
+.card-3d-hover:hover {
+  transform: translateY(-4px);
+}

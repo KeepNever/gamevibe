@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    // server/routes/games.ts 会 import 前端数据文件 src/data/games.ts，
+    // 而它用 @/ 别名引用类型。缺了这条映射，后端类型检查会直接报 TS2307。
+    // 第二个候选是必需的：moduleResolution=NodeNext 属 ESM 语义，不带扩展名的
+    // 说明符不会被当作文件解析（只当目录找），必须显式给出 .ts。
+    "paths": {
+      "@/*": ["./src/*", "./src/*.ts"]
+    }
+  },
+  "include": ["server/**/*.ts", "scripts/**/*.ts"]
+}
