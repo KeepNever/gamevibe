@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { CREATE_TABLES } from './schema.ts'
 import { seedRbac } from './seedRbac.ts'
 import { runMigrations, SCHEMA_VERSION } from './migrations.ts'
@@ -10,11 +10,74 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const dataDir = join(__dirname, 'data')
 mkdirSync(dataDir, { recursive: true })
 
-const dbPath = join(dataDir, 'gamevibe.db')
+const dbPath = process.env.DB_FILE
+  ? resolve(process.env.DB_FILE)
+  : join(dataDir, 'gamevibe.db')
 
-export const db: DatabaseSync = new DatabaseSync(dbPath)
-db.exec('PRAGMA journal_mode = WAL;')
-db.exec('PRAGMA foreign_keys = ON;')
+/**
+ * 数据库文件损坏时，不要带着它启动，也不要直接删掉。
+ *
+ * 背景：部署会把本地这份库当快照上传，而沙箱里可能残留上一次运行留下的
+ * -wal / -shm。文件与 WAL 对不上时 SQLite 抛 SQLITE_CORRUPT(11)，表现为
+ * 「malformed database schema ... invalid rootpage」。过去这种情况会让整个
+ * 服务起不来、分享链接直接挂掉——一个数据文件的问题不该炸掉整个网站。
+ *
+ * 策略：把坏文件连同 -wal/-shm 一起改名移开（保留现场，不删），再重建空库，
+ * 由 schema + migrations + 种子把结构补齐。只在「确实是损坏」时这么做，
+ * 其他错误照常抛出，避免把真实问题掩盖成一次静默重建。DB_NO_HEAL=1 可关闭。
+ */
+function looksCorrupt(err: unknown): boolean {
+  if ((err as { errcode?: number })?.errcode === 11) return true // SQLITE_CORRUPT
+  const msg = err instanceof Error ? err.message : String(err)
+  return /malformed|not a database|invalid rootpage|disk image is malformed/i.test(msg)
+}
+
+function setAside(path: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const aside = `${path}.corrupt-${stamp}`
+  for (const suffix of ['', '-wal', '-shm']) {
+    const from = `${path}${suffix}`
+    if (!existsSync(from)) continue
+    try {
+      renameSync(from, `${aside}${suffix}`)
+    } catch {
+      /* 单个文件移不动不阻断，重建时会被覆盖 */
+    }
+  }
+  return aside
+}
+
+function attemptOpen(path: string): DatabaseSync {
+  const conn = new DatabaseSync(path)
+  try {
+    // 第一条 PRAGMA 就会读 schema，损坏在这里暴露，而不是等到某个业务查询才炸
+    conn.exec('PRAGMA journal_mode = WAL;')
+    conn.exec('PRAGMA foreign_keys = ON;')
+    return conn
+  } catch (e) {
+    try {
+      conn.close()
+    } catch {
+      /* 已关闭或本就打不开 */
+    }
+    throw e
+  }
+}
+
+function openDatabase(path: string): DatabaseSync {
+  try {
+    return attemptOpen(path)
+  } catch (e) {
+    if (!looksCorrupt(e) || process.env.DB_NO_HEAL === '1') throw e
+    const aside = setAside(path)
+    console.warn('  ⚠️ 数据库文件损坏，已移开并重建空库')
+    console.warn(`     现场保留在：${aside}`)
+    console.warn(`     原因：${e instanceof Error ? e.message : String(e)}`)
+    return attemptOpen(path)
+  }
+}
+
+export const db: DatabaseSync = openDatabase(dbPath)
 db.exec(CREATE_TABLES)
 
 // 版本化迁移：老库里历史遗留的「幂等 ALTER」由 migration 1 接管，
