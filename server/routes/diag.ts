@@ -216,4 +216,100 @@ diag.get('/providers', async (c) => {
   })
 })
 
+/**
+ * GET /api/diag/db —— 托管数据库（Turso / libSQL）连通性与往返延迟
+ *
+ * 为什么不用 @libsql/client：探测要的是「这台机器能不能连上、要多久」，
+ * 依赖一个客户端库反而多一层变量。这里直接打 /v2/pipeline 的 HTTP 契约，
+ * 与客户端底层走的是同一条路。
+ *
+ * 不返回 token 的任何片段。
+ */
+diag.get('/db', async (c) => {
+  const rawUrl = process.env.TURSO_DATABASE_URL ?? ''
+  const token = process.env.TURSO_AUTH_TOKEN ?? ''
+
+  if (!rawUrl || !token) {
+    return c.json({
+      ok: false,
+      configured: false,
+      reason: '未配置 TURSO_DATABASE_URL / TURSO_AUTH_TOKEN，当前使用本地 SQLite',
+    })
+  }
+
+  const httpUrl = rawUrl.replace(/^libsql:\/\//, 'https://').replace(/\/+$/, '')
+  const body = JSON.stringify({
+    requests: [
+      { type: 'execute', stmt: { sql: 'SELECT 1 AS ok, sqlite_version() AS v' } },
+      { type: 'close' },
+    ],
+  })
+
+  const samples: number[] = []
+  let status: number | null = null
+  let sqliteVersion: string | null = null
+  let error: string | null = null
+
+  // 5 次采样：单次数字看不出抖动，p50 才能用来判断「页面里连查 5 张表要多久」
+  for (let i = 0; i < 5; i++) {
+    const t0 = Date.now()
+    try {
+      const res = await fetch(`${httpUrl}/v2/pipeline`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      })
+      status = res.status
+      const text = await res.text()
+      samples.push(Date.now() - t0)
+      if (res.ok && !sqliteVersion) {
+        try {
+          const j = JSON.parse(text) as {
+            results?: { response?: { result?: { rows?: unknown[][] } } }[]
+          }
+          const row = j.results?.[0]?.response?.result?.rows?.[0] as
+            | { value?: string }[]
+            | undefined
+          sqliteVersion = row?.[1]?.value ?? null
+        } catch {
+          /* 结构异常不影响连通性结论 */
+        }
+      } else if (!res.ok && !error) {
+        error = `HTTP ${res.status}: ${text.slice(0, 160)}`
+      }
+    } catch (e) {
+      const cause = (e as { cause?: { code?: string; message?: string } })?.cause
+      error = cause?.code || cause?.message || (e instanceof Error ? e.message : String(e))
+      samples.push(Date.now() - t0)
+    }
+  }
+
+  const sorted = [...samples].sort((a, b) => a - b)
+  const reachable = samples.length > 0 && status !== null && status < 500 && !error
+
+  return c.json({
+    ok: reachable,
+    configured: true,
+    host: (() => {
+      try {
+        return new URL(httpUrl).host
+      } catch {
+        return null
+      }
+    })(),
+    region: /aws-([a-z0-9-]+)\.turso\.io$/.exec(httpUrl)?.[1] ?? null,
+    status,
+    sqliteVersion,
+    /** 首次含 TLS 握手，通常明显高于后续 */
+    samples,
+    min: sorted[0] ?? null,
+    p50: sorted[Math.floor(sorted.length / 2)] ?? null,
+    max: sorted[sorted.length - 1] ?? null,
+    error,
+    node: process.version,
+    checkedAt: Date.now(),
+  })
+})
+
 export default diag
