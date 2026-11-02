@@ -50,7 +50,7 @@ const errs = []
 page.on('pageerror', (e) => errs.push(e.message))
 
 // ── 1. 登录页要素 ────────────────────────────────────
-await page.goto(`${base}/login`, { waitUntil: 'networkidle' })
+await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(600)
 ok('登录页含「记住我」', await page.locator('text=记住我').count() > 0)
 ok('登录页含「忘记密码」入口', await page.locator('text=忘记密码').count() > 0)
@@ -73,8 +73,10 @@ ok('非法邮箱即时提示', await page.locator('text=邮箱格式不正确').
 await page.screenshot({ path: `${outDir}/02-login-validation.jpg`, type: 'jpeg', quality: 88 })
 
 // ── 2. 未登录访问受保护页 ─────────────────────────────
-await page.goto(`${base}/favorites`, { waitUntil: 'networkidle' })
-await page.waitForTimeout(500)
+await page.goto(`${base}/favorites`, { waitUntil: 'domcontentloaded' })
+// 等 SPA 挂载 + 路由守卫跑完再看最终 URL：固定 sleep 在慢网/首次拉 chunk 时会误判「未拦截」
+await page.waitForFunction(() => location.pathname === '/login', null, { timeout: 20000 })
+  .catch(() => console.log('[warn] 路由守卫未在 20s 内把未登录用户跳到 /login'))
 const urlBlocked = page.url()
 ok('未登录访问 /favorites 被拦截', urlBlocked.includes('/login'), urlBlocked)
 ok('拦截时带上回跳参数', urlBlocked.includes('redirect=%2Ffavorites') || urlBlocked.includes('redirect=/favorites'))
@@ -84,7 +86,7 @@ const adminToken = await loginToken('老白不白@seed.local')
 ok('管理员账号可取到令牌', !!adminToken)
 await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
 await page.evaluate((t) => localStorage.setItem('gv_token', t), adminToken)
-await page.goto(`${base}/admin`, { waitUntil: 'networkidle' })
+await page.goto(`${base}/admin`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1800)
 ok('管理员能打开 /admin', page.url().includes('/admin'), page.url())
 ok('后台标题渲染', await page.locator('text=用户与权限').count() > 0)
@@ -102,14 +104,15 @@ await page.screenshot({ path: `${outDir}/04-admin-matrix.jpg`, type: 'jpeg', qua
 const userToken = await loginToken('阿坤Kun@seed.local')
 ok('普通用户可取到令牌', !!userToken)
 await page.evaluate((t) => localStorage.setItem('gv_token', t), userToken)
-await page.goto(`${base}/admin`, { waitUntil: 'networkidle' })
+await page.goto(`${base}/admin`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1200)
 const urlUser = page.url()
 ok('普通用户进 /admin 被挡回首页', !urlUser.includes('/admin'), urlUser)
 
 // ── 5. 忘记密码页 ────────────────────────────────────
-await page.goto(`${base}/forgot-password`, { waitUntil: 'networkidle' })
-await page.waitForTimeout(600)
+await page.goto(`${base}/forgot-password`, { waitUntil: 'domcontentloaded' })
+await page.waitForFunction(() => /找回密码/.test(document.body.innerText), null, { timeout: 20000 })
+  .catch(() => console.log('[warn] 忘记密码页未渲染出内容'))
 ok('忘记密码页可访问', await page.locator('text=找回密码').count() > 0)
 await page.screenshot({ path: `${outDir}/05-forgot.jpg`, type: 'jpeg', quality: 88 })
 
