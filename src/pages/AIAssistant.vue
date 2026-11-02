@@ -6,6 +6,16 @@ import { useGameStore } from '@/stores/gameStore'
 import { useAuthStore } from '@/stores/authStore'
 import { streamAIChat, type WebMode } from '@/lib/ai'
 import TastePanel from '@/components/TastePanel.vue'
+
+/**
+ * compact = 嵌在右侧抽屉里（约 448px 宽）。
+ * 用视口断点判断宽窄是错的：抽屉很窄，但用户窗口可能是 1920px，
+ * 于是 xl:flex-row 会把两栏硬塞进 448px，文字被挤成一条。这里改由容器
+ * 自身宽度决定；抽屉内不再并排，改成「对话 / 口味画像」切换。
+ */
+const props = withDefaults(defineProps<{ compact?: boolean }>(), { compact: false })
+const compact = computed(() => props.compact)
+const compactTab = ref<'chat' | 'taste'>('chat')
 import { games } from '@/data/games'
 import type { ChatMessage, Game } from '@/types/game'
 
@@ -164,11 +174,36 @@ function handleKeyDown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex flex-col xl:flex-row gap-6 max-w-6xl mx-auto items-start">
+  <div class="@container" :class="compact ? 'h-full min-h-0' : 'max-w-6xl mx-auto'">
+  <div class="flex" :class="compact ? 'flex-col h-full min-h-0' : 'flex-col @[46rem]:flex-row gap-6 items-start'">
+    <!-- 抽屉内：切换条代替并排，避免在 448px 里塞两栏 -->
+    <div
+      v-if="compact"
+      class="shrink-0 flex items-center justify-between gap-2 pb-3 mb-3 border-b border-[var(--border)]"
+    >
+      <div class="flex gap-1 p-0.5 rounded-lg bg-[var(--surface-2)]">
+        <button
+          @click="compactTab = 'chat'"
+          class="px-2.5 py-1 rounded-md text-[11px] transition-colors"
+          :class="compactTab === 'chat' ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm' : 'text-[var(--text-faint)] hover:text-[var(--text-dim)]'"
+        >对话</button>
+        <button
+          @click="compactTab = 'taste'"
+          class="px-2.5 py-1 rounded-md text-[11px] transition-colors"
+          :class="compactTab === 'taste' ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm' : 'text-[var(--text-faint)] hover:text-[var(--text-dim)]'"
+        >口味画像</button>
+      </div>
+      <button
+        v-if="store.chatHistory.length > 0 && compactTab === 'chat'"
+        @click="store.clearChat()"
+        class="text-[11px] text-[var(--text-faint)] hover:text-[var(--text-dim)] transition-colors"
+      >清空对话</button>
+    </div>
+
     <!-- 主聊天列 -->
-    <div class="flex flex-col h-[calc(100vh-6rem)] flex-1 min-w-0 w-full">
+    <div v-show="!(compact && compactTab === 'taste')" class="flex flex-col flex-1 min-w-0 w-full" :class="compact ? 'h-full min-h-0' : 'h-[calc(100vh-6rem)]'">
     <!-- Header -->
-    <div class="shrink-0 pb-6 border-b border-[var(--border)]">
+    <div v-if="!compact" class="shrink-0 pb-6 border-b border-[var(--border)]">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-strong to-accent-blue flex items-center justify-center">
@@ -432,7 +467,13 @@ function handleKeyDown(e: KeyboardEvent) {
     </form>
     </div>
 
-    <!-- 右侧：口味画像面板（仅宽屏显示，数据来自后端 /api/ai/profile） -->
-    <TastePanel class="hidden xl:block w-72 shrink-0 h-[calc(100vh-6rem)]" />
+    <!-- 右侧：口味画像面板（宽屏并排；抽屉内走顶部切换条） -->
+    <TastePanel
+      class="shrink-0"
+      :class="compact
+        ? (compactTab === 'taste' ? 'block w-full h-full min-h-0 overflow-y-auto' : 'hidden')
+        : 'hidden @[46rem]:block w-72 h-[calc(100vh-6rem)]'"
+    />
+  </div>
   </div>
 </template>

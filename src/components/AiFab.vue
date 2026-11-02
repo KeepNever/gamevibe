@@ -27,7 +27,7 @@ const open = ref(false)
         </button>
       </div>
       <div class="flex-1 overflow-hidden">
-        <AIAssistant />
+        <AIAssistant compact />
       </div>
     </div>
   </transition>
