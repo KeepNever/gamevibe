@@ -109,5 +109,9 @@ export interface AuthUser {
   email: string
   display_name: string | null
   avatar: string | null
+  bio?: string | null
+  phone?: string | null
+  phone_verified?: 0 | 1
   created_at: number
+  updated_at?: number | null
 }

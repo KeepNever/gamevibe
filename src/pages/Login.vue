@@ -11,6 +11,7 @@ import {
   Loader2,
   AlertCircle,
   ArrowLeft,
+  Info,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/authStore'
 import { ApiError } from '@/lib/api'
@@ -29,6 +30,11 @@ const error = ref('')
 const loading = ref(false)
 const touched = ref({ email: false, password: false })
 const capsLock = ref(false)
+
+/** 注销后的落地提示（不当作错误，用中性文案） */
+const flash = computed(() =>
+  route.query.deleted === '1' ? '账号已注销，感谢你曾经来过。' : '',
+)
 
 /** 登录成功后回到原来的页面；仅接受站内路径，防止被当成开放跳转 */
 const redirectTo = computed(() => {
@@ -193,6 +199,14 @@ async function submit() {
           />
           <span class="text-sm text-[var(--text-dim)]">记住我（30 天内免登录）</span>
         </label>
+
+        <div
+          v-if="flash"
+          class="flex items-start gap-2 text-xs text-[var(--text-dim)] bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-2.5"
+        >
+          <Info class="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{{ flash }}</span>
+        </div>
 
         <div
           v-if="error"

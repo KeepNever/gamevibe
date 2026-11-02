@@ -2,8 +2,10 @@ import { Hono } from 'hono'
 import { db } from '../db/index.ts'
 import { authMiddleware, requirePermission } from '../middleware/auth.ts'
 import { assignRole, revokeRole, getMaxLevel, listRoles, getUserRoles } from '../lib/rbac.ts'
+import { writeAudit, listAudit, AUDIT_LABELS } from '../lib/audit.ts'
+import { revokeAllSessions } from '../lib/session.ts'
 
-const admin = new Hono()
+const admin = new Hono<{ Variables: { userId: string; username: string } }>()
 
 // /api/admin/* 全部需要登录（这是独立子应用，不影响其它公开路由）
 admin.use('*', authMiddleware)
@@ -86,8 +88,18 @@ admin.patch('/users/:id/role', requirePermission('user.manage'), async (c) => {
   if (roleId >= myLevel) return c.json({ error: '不能授予与自己同级或更高的角色' }, 403)
 
   // 单人单角色：先清空再赋新角色（保持模型简单可解释）
+  const before = getUserRoles(targetId).map((r) => r.key)
   for (const r of getUserRoles(targetId)) revokeRole(targetId, r.key)
   assignRole(targetId, roleKey, me)
+
+  writeAudit(db, c, {
+    actorId: me,
+    actorName: c.get('username'),
+    action: 'admin.user.role',
+    targetType: 'user',
+    targetId,
+    detail: { user: target.username, changes: [{ field: '角色', from: before.join(','), to: roleKey }] },
+  })
 
   return c.json({ ok: true, user: { id: targetId, roles: [roleKey] } })
 })
@@ -102,15 +114,40 @@ admin.patch('/users/:id/status', requirePermission('user.manage'), async (c) => 
   if (!['active', 'disabled'].includes(status)) return c.json({ error: '状态不合法' }, 400)
   if (targetId === me) return c.json({ error: '不能停用自己的账号' }, 400)
 
-  const target = db.prepare('SELECT id FROM users WHERE id=?').get(targetId)
+  const target = db.prepare('SELECT id, username, status FROM users WHERE id=?').get(targetId) as any
   if (!target) return c.json({ error: '用户不存在' }, 404)
 
   if (getMaxLevel(targetId) >= getMaxLevel(me)) {
     return c.json({ error: '不能操作同级或更高权限的用户' }, 403)
   }
 
-  db.prepare('UPDATE users SET status=? WHERE id=?').run(status, targetId)
+  db.prepare('UPDATE users SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), targetId)
+
+  writeAudit(db, c, {
+    actorId: me,
+    actorName: c.get('username'),
+    action: 'admin.user.status',
+    targetType: 'user',
+    targetId,
+    detail: { user: target.username, changes: [{ field: '状态', from: target.status, to: status }] },
+  })
+
+  // 停用后必须立刻踢掉该用户的全部会话，否则他手里的 Cookie 还能用到自然过期
+  if (status === 'disabled') {
+    revokeAllSessions(db, String(targetId))
+  }
+
   return c.json({ ok: true, user: { id: targetId, status } })
+})
+
+// ══ 审计日志（谁在何时对谁做了什么）═══════════════════
+admin.get('/audit', requirePermission('admin.access'), (c) => {
+  const page = Number(c.req.query('page') || 1)
+  const pageSize = Number(c.req.query('pageSize') || 20)
+  const q = String(c.req.query('q') || '').trim()
+  const action = String(c.req.query('action') || '').trim()
+  const r = listAudit(db, { page, pageSize, q, action })
+  return c.json({ ...r, labels: AUDIT_LABELS })
 })
 
 // ══ 概览统计 ══════════════════════════════════════════

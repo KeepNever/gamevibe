@@ -21,7 +21,7 @@ import ShareCard from '@/components/ShareCard.vue'
 import { getRawgDetail } from '@/lib/discoverApi'
 import type { DiscoverGame } from '@/types/discover'
 import { getFriendsPlaying } from '@/lib/socialApi'
-import { getToken } from '@/lib/api'
+import { hasSession } from '@/lib/api'
 import { getAiReview, getAiReviewDigest } from '@/lib/liveApi'
 import type { AiReviewResult, ReviewDigestResult } from '@/types/live'
 
@@ -252,14 +252,14 @@ const positiveRate = computed(() => {
 
 // ── 好友在玩（我关注的人里库存有这款游戏的）──
 const friendsPlaying = ref<any[]>([])
-const showFriendsHint = computed(() => !!getToken() && friendsPlaying.value.length === 0)
+const showFriendsHint = computed(() => !!hasSession() && friendsPlaying.value.length === 0)
 function friendStatusLabel(s: string): string {
   const map: Record<string, string> = { playing: '正在玩', completed: '已通关', wishlist: '想玩', backlog: '在清单' }
   return map[s] || s
 }
 async function loadFriendsPlaying() {
   friendsPlaying.value = []
-  if (!game.value || !getToken()) return
+  if (!game.value || !hasSession()) return
   try {
     const r = await getFriendsPlaying(game.value.id)
     friendsPlaying.value = r.friends

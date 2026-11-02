@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { CREATE_TABLES } from './schema.ts'
 import { seedRbac } from './seedRbac.ts'
+import { runMigrations, SCHEMA_VERSION } from './migrations.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dataDir = join(__dirname, 'data')
@@ -16,13 +17,13 @@ db.exec('PRAGMA journal_mode = WAL;')
 db.exec('PRAGMA foreign_keys = ON;')
 db.exec(CREATE_TABLES)
 
-// 幂等迁移：为已存在的库补充新列（忽略「列已存在」错误）
-for (const col of ['bio TEXT', "status TEXT NOT NULL DEFAULT 'active'"]) {
-  try {
-    db.exec(`ALTER TABLE users ADD COLUMN ${col};`)
-  } catch {
-    // duplicate column — 忽略
-  }
+// 版本化迁移：老库里历史遗留的「幂等 ALTER」由 migration 1 接管，
+// 新库则一次性建到位。失败直接抛错拒绝启动——带着半套结构跑起来更危险。
+const mig = runMigrations(db)
+if (mig.applied.length) {
+  console.log(`  🧱 数据库迁移：${mig.from} → ${mig.to}（执行 ${mig.applied.join(', ')}）`)
+} else {
+  console.log(`  🧱 数据库架构已是最新：v${SCHEMA_VERSION}`)
 }
 
 // RBAC 种子：角色 / 权限点 / 默认角色 / 首个管理员（幂等，每次启动都跑）

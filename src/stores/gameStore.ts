@@ -3,7 +3,7 @@ import type { Ref } from 'vue'
 import { ref, computed } from 'vue'
 import type { FilterState, SortKey, Genre, Platform, ChatMessage, ViewMode, Game } from '@/types/game'
 import { games } from '@/data/games'
-import { api, getToken } from '@/lib/api'
+import { api, hasSession } from '@/lib/api'
 import { getReviewAggregate } from '@/lib/reviewApi'
 
 export type CollectionKey = 'wishlist' | 'playing' | 'completed'
@@ -54,7 +54,7 @@ function applyFilters(filters: FilterState): Game[] {
 
 // 后端同步（仅登录后触发）
 async function syncCollection(kind: string, gameId: string, add: boolean) {
-  if (!getToken()) return
+  if (!hasSession()) return
   try {
     if (add) await api.post(`/collections/${kind}`, { gameId })
     else await api.del(`/collections/${kind}`, { gameId })
@@ -64,7 +64,7 @@ async function syncCollection(kind: string, gameId: string, add: boolean) {
 }
 
 async function syncRecent(gameId: string) {
-  if (!getToken()) return
+  if (!hasSession()) return
   try {
     await api.post('/collections/recent', { gameId })
   } catch {
@@ -155,7 +155,7 @@ export const useGameStore = defineStore('game', () => {
 
   // 后端初始化同步
   async function initFromBackend() {
-    if (!getToken()) return
+    if (!hasSession()) return
     try {
       const [w, p, c, r] = await Promise.all([
         api.get('/collections/wishlist').then((x) => x.json()),

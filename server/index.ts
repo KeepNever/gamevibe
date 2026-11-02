@@ -23,8 +23,10 @@ import social from './routes/social.ts'
 import live from './routes/live.ts'
 import diag from './routes/diag.ts'
 import admin from './routes/admin.ts'
+import account from './routes/account.ts'
 import { rateLimit } from './middleware/rateLimit.ts'
 import { securityHeaders } from './middleware/securityHeaders.ts'
+import { pruneSessions } from './lib/session.ts'
 
 // ════════════════════════════════════════════════
 //  进程级保护：单条坏请求/未捕获异常不再拖垮整个服务
@@ -78,6 +80,10 @@ app.use('/api/auth/*', async (c, next) => {
 })
 // AI 对话端点最贵（真实调用 LLM、流式长文本）：20 次/分钟
 app.use('/api/ai/chat', rateLimit({ maxRequests: 20, windowMs: 60_000 }))
+// 改密码：10 次/分钟（这是个可以被拿来试探旧密码的端点）
+app.use('/api/account/password', rateLimit({ maxRequests: 10, windowMs: 60_000 }))
+// 换绑邮箱发码：5 次/分钟（内部还有 60 秒节流，这里防多账号并发轰炸）
+app.use('/api/account/email/request', rateLimit({ maxRequests: 5, windowMs: 60_000 }))
 // AI 其余端点（精选 / 点评 / 口碑 / 画像，均带缓存）：60 次/分钟
 // 说明：详情页一次会打 review + reviewDigest 两个 AI 请求，
 // 若整树沿用 20 次/分钟会误伤正常浏览（10 个详情页即触顶，且限流键按路径前缀分组）
@@ -123,6 +129,14 @@ app.route('/api/stats', stats)
 app.route('/api/recommendations', recommendations)
 app.route('/api/social', social)
 app.route('/api/admin', admin)
+app.route('/api/account', account)
+
+// 启动时清一次过期会话，避免 sessions 表随访问量单向增长
+try {
+  pruneSessions(db)
+} catch (e) {
+  console.warn('[session] 清理过期会话跳过：', e instanceof Error ? e.message : e)
+}
 
 // ════════════════════════════════════════════════
 //  静态资源托管（同源部署前端，SPA fallback）

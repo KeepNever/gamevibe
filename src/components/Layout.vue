@@ -4,7 +4,8 @@ import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Home, Search, Bot, Scale, Heart, Gamepad2, Grid, Trophy,
   BadgePercent, Sun, Moon, MoreHorizontal, X, Sparkles,
-  Library, LogOut, User, Newspaper, BarChart, Users, Rss, Bell, ShieldCheck
+  Library, LogOut, User, Newspaper, BarChart, Users, Rss, Bell, ShieldCheck,
+  Settings as SettingsIcon
 } from 'lucide-vue-next'
 import { useGameStore } from '@/stores/gameStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -74,14 +75,19 @@ onUnmounted(() => document.removeEventListener('mousedown', handleClickOutside))
 import { watch } from 'vue'
 watch(() => route.path, () => { mobileOpen.value = false })
 
-function handleLogout() {
+async function handleLogout() {
   userMenuOpen.value = false
-  auth.logout()
+  await auth.logout()
 }
 
 const avatarChar = computed(() =>
   (auth.user?.display_name || auth.user?.username || '?')[0].toUpperCase(),
 )
+/** 用户设置了头像图片就用图片，否则退回昵称首字 */
+const avatarUrl = computed(() => {
+  const a = auth.user?.avatar
+  return a && /^https?:\/\//.test(a) ? a : ''
+})
 
 // ── 通知未读计数 ──
 const unreadCount = ref(0)
@@ -154,27 +160,36 @@ watch(() => route.path, () => { if (auth.isLoggedIn) loadUnreadCount() })
           <!-- 已登录 -->
           <template v-if="auth.isLoggedIn">
             <div ref="menuRef" class="relative flex items-center gap-2 flex-1 min-w-0">
-              <div class="w-7 h-7 rounded-full bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-xs font-bold shrink-0">
-                {{ avatarChar }}
+              <div class="w-7 h-7 rounded-full overflow-hidden bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-xs font-bold shrink-0">
+                <img v-if="avatarUrl" :src="avatarUrl" class="w-full h-full object-cover" alt="" />
+                <span v-else>{{ avatarChar }}</span>
               </div>
               <button @click="userMenuOpen = !userMenuOpen" class="flex-1 min-w-0 text-left">
                 <div class="text-xs font-medium text-[var(--text)] truncate">{{ auth.user?.display_name || auth.user?.username }}</div>
-                <div class="text-[10px] text-[var(--text-faint)]">点击查看更多</div>
+                <div class="text-[10px] text-[var(--text-faint)]">账户设置与更多</div>
               </button>
 
               <!-- 用户下拉菜单 -->
               <div v-if="userMenuOpen" class="absolute bottom-full left-0 right-0 mb-2 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden fade-in">
                 <div class="p-3 border-b border-[var(--border)]">
-                  <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-sm font-bold">
-                      {{ avatarChar }}
+                  <RouterLink to="/settings" @click="userMenuOpen = false" class="flex items-center gap-2 group">
+                    <div class="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-sm font-bold shrink-0">
+                      <img v-if="avatarUrl" :src="avatarUrl" class="w-full h-full object-cover" alt="" />
+                      <span v-else>{{ avatarChar }}</span>
                     </div>
-                    <div>
-                      <div class="text-sm font-medium text-[var(--text)]">{{ auth.user?.display_name || auth.user?.username }}</div>
-                      <div class="text-[11px] text-[var(--text-faint)]">{{ auth.user?.email }}</div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium text-[var(--text)] truncate group-hover:text-accent transition-colors">
+                        {{ auth.user?.display_name || auth.user?.username }}
+                      </div>
+                      <div class="text-[11px] text-[var(--text-faint)] truncate">{{ auth.user?.email }}</div>
                     </div>
-                  </div>
+                  </RouterLink>
                 </div>
+                <RouterLink to="/settings"
+                  class="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
+                  @click="userMenuOpen = false">
+                  <SettingsIcon class="w-4 h-4" /> 账户设置
+                </RouterLink>
                 <RouterLink to="/favorites"
                   class="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
                   @click="userMenuOpen = false">
@@ -264,12 +279,22 @@ watch(() => route.path, () => { if (auth.isLoggedIn) loadUnreadCount() })
           <!-- 移动端用户信息 -->
           <template v-if="auth.isLoggedIn">
             <div class="mt-4 pt-4 border-t border-[var(--border)]">
-              <div class="flex items-center gap-2 px-3 py-2">
-                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-xs font-bold">
-                  {{ avatarChar }}
+              <RouterLink to="/settings" @click="mobileOpen = false"
+                class="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-[var(--surface-2)] transition-colors">
+                <div class="w-7 h-7 rounded-full overflow-hidden bg-gradient-to-br from-accent to-accent-cyan flex items-center justify-center text-white text-xs font-bold shrink-0">
+                  <img v-if="avatarUrl" :src="avatarUrl" class="w-full h-full object-cover" alt="" />
+                  <span v-else>{{ avatarChar }}</span>
                 </div>
-                <div class="min-w-0"><div class="text-sm font-medium truncate">{{ auth.user?.display_name || auth.user?.username }}</div></div>
-              </div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-medium truncate">{{ auth.user?.display_name || auth.user?.username }}</div>
+                  <div class="text-[10px] text-[var(--text-faint)] truncate">{{ auth.user?.email }}</div>
+                </div>
+                <SettingsIcon class="w-4 h-4 text-[var(--text-faint)]" />
+              </RouterLink>
+              <RouterLink to="/settings" @click="mobileOpen = false"
+                class="flex items-center gap-2 px-3 py-2 mt-1 text-sm text-[var(--text-dim)] hover:bg-[var(--surface-2)] rounded-xl transition-colors">
+                <SettingsIcon class="w-4 h-4" /> 账户设置
+              </RouterLink>
               <button @click="handleLogout(); mobileOpen = false"
                 class="flex items-center gap-2 px-3 py-2 mt-1 text-sm text-accent-red hover:bg-red-5/10 w-full rounded-xl transition-colors">
                 <LogOut class="w-4 h-4" /> 退出登录

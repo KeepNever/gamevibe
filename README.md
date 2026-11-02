@@ -133,7 +133,15 @@ Registration is open and immediately active — no approval queue. Every new acc
 
 **"You can't act on your equals."** An admin cannot demote another admin, change their own role, or disable their own account. The UI disables those controls and the API rejects them independently.
 
-**Sessions & abuse control** — JWT (HS256), 7-day expiry, or 30 days with "remember me". Failed logins are counted **per account** (5 within 15 minutes → 429), separate from the global per-IP limiter, so slow credential stuffing is stopped without locking out everyone behind one office IP.
+**Sessions live on the server.** Login issues a JWT carrying a `sid`, and the token is delivered in an **httpOnly cookie** — page JavaScript cannot read it, so an XSS bug can't exfiltrate credentials the way a `localStorage` token can. Every request re-checks the session row, which is what makes "log out that other device" real instead of cosmetic: revoking the row kills that token on the next request. Changing the password revokes every other session; header-based legacy tokens are invalidated by comparing the token's `iat` against `users.password_changed_at`.
+
+Failed logins are counted **per account** (5 within 15 minutes → 429), separate from the global per-IP limiter, so slow credential stuffing is stopped without locking out everyone behind one office IP.
+
+**Account center** (`/settings`) — profile (nickname / avatar / bio), username change with a 30-day cooldown, password change, email rebinding with two-sided verification (code to the new address, notice to the old one), a device list with per-device revocation, JSON data export, a personal audit trail, and account deletion that anonymises immediately while keeping the user's reviews attached to "已注销用户".
+
+**Audit log** — logins, failed logins, password changes, email rebinds, role changes and suspensions are recorded with actor, IP, target and result. Failures are kept too: a log that only records successes cannot show you someone guessing. Passwords, tokens and verification codes are never written to it.
+
+**Phone numbers are stored but explicitly unverified.** No SMS gateway is wired up yet, so the UI keeps the amber "未验证" badge and refuses to treat the number as a login or recovery credential — rather than faking a green checkmark.
 
 **Password reset, two channels** — with `RESEND_API_KEY` set the link is emailed; without it the endpoint returns the link in the response and the UI labels it "demo mode" instead of pretending an email went out. Tokens are stored as SHA-256 hashes, expire in 30 minutes and are single-use.
 
@@ -206,6 +214,8 @@ No test framework — instead, self-contained verification scripts driven by a r
 
 | Script | Checks |
 |---|---|
+| `verifyAccountCenter.mjs` | 53 assertions across the whole account lifecycle: cookie is httpOnly, profile/username cooldown, password change kicks other devices, email rebind two-sided verification, device revoke, audit trail, export, deletion anonymisation |
+| `verifyAuthUI.mjs` | 16 browser assertions: login-page affordances, redirect with `?redirect=`, admin can enter `/admin`, regular user is bounced |
 | `verifyAchievements.mjs` | 32 assertions: positive-rate equals the true ratio, legacy wrong app-ids resolve to *this* game, no `source:'mock'` anywhere |
 | `verifyRealtime.ts` | 24 assertions on the live-metric layer and its `real` flags |
 | `smokeAI.ts` | 23 end-to-end AI assertions (with 429 back-off) |
@@ -278,7 +288,15 @@ Steam 另有一个 0–9 档的 `review_score`，折算成百分比会和同一�
 
 **不能操作同级或更高**：管理员不能降级另一个管理员，不能改自己的角色，也不能停用自己。界面上这些控件直接禁用，接口也会独立拒绝。
 
-**会话与撞库防护**：JWT（HS256）默认 7 天，「记住我」30 天。登录失败按**账号**计数（15 分钟内 5 次 → 429），与按 IP 的全局限流分开，避免整间办公室共用一个出口 IP 时被连坐。
+**会话存在服务端**：登录签发带 `sid` 的 JWT，令牌放在 **httpOnly Cookie** 里——页面 JavaScript 读不到，XSS 偷不走（存 localStorage 的老做法做不到这一点）。每个请求都会回查会话行，「把别的设备踢下线」才真的生效，而不是只清本地缓存。改密码会撤销其它全部会话；历史遗留的走请求头的令牌，则用 `iat` 与 `users.password_changed_at` 比对，改密后立即失效。
+
+登录失败按**账号**计数（15 分钟内 5 次 → 429），与按 IP 的全局限流分开，避免整间办公室共用一个出口 IP 时被连坐。
+
+**账户中心**（`/settings`）：昵称/头像/简介、用户名改名（30 天冷却）、改密码、邮箱换绑（新邮箱验证码 + 旧邮箱通知的双向验证）、登录设备列表与单设备下线、数据导出 JSON、个人操作日志、注销账号（资料立即匿名化，评论与收藏保留为「已注销用户」）。
+
+**审计日志**：登录、登录失败、改密、换绑、角色调整、停用启用全部留痕，记操作人、IP、目标与结果。**失败也记**——只记成功的日志看不出有人在撞库。密码、令牌、验证码原文一律不入表。
+
+**手机号只记录、不假装验证**：短信通道尚未接入，界面保留琥珀色「未验证」，也不把它当作登录或找回凭据；不会为了好看硬打一个绿色对勾。
 
 **找回密码双通道**：配了 `RESEND_API_KEY` 就走真实发信；没配则接口直接把重置链接返回、界面明确标注「演示模式」，不假装邮件已发出。令牌只存 SHA-256 哈希，30 分钟过期，一次性使用。
 
@@ -329,7 +347,19 @@ gamevibe/
 
 ## 质量保障
 
-没有引入测试框架，而是用真实浏览器 + 真实接口驱动的自包含回归脚本：成就榜 32 条断言、实时数据层 24 条、AI 端到端 23 条，外加探索页卡片 / 破图检查、首屏 AI 可见性检查、appid 全表重审计。类型检查（`tsc` + `vue-tsc`）全绿。
+没有引入测试框架，而是用真实浏览器 + 真实接口驱动的自包含回归脚本：
+
+| 脚本 | 覆盖内容 |
+|---|---|
+| `verifyAccountCenter.mjs` | 53 条：Cookie 是 httpOnly、资料与用户名冷却、改密踢其它端、换绑双验证、设备下线、审计留痕、数据导出、注销匿名化 |
+| `verifyAuthUI.mjs` | 16 条：登录页要素、`?redirect=` 回跳、管理员进后台、普通用户被挡 |
+| `verifyAchievements.mjs` | 32 条：好评率等于真实比值、旧 appid 不串号、无 `source:'mock'` |
+| `verifyRealtime.ts` | 24 条：实时数据层与 `real` 标记 |
+| `smokeAI.ts` | 23 条：AI 端到端（带 429 退避） |
+| `verifyExploreUI.mjs` | 探索页卡片数、破图数、图片分辨率 |
+| `verifyFirstScreen.mjs` | 未登录状态下首屏 AI 能力是否真的可见 |
+
+类型检查（`npm run server:typecheck` + 构建期 `vue-tsc`）全绿。
 
 ## 许可
 

@@ -6,7 +6,12 @@ export interface User {
   email: string
   display_name: string | null
   avatar: string | null
+  bio?: string | null
+  /** 手机号（本期仅记录与待验证，短信通道接入后置 phone_verified=1） */
+  phone?: string | null
+  phone_verified?: 0 | 1
   created_at: number
+  updated_at?: number | null
 }
 
 export type LibraryStatus = 'wishlist' | 'playing' | 'completed'

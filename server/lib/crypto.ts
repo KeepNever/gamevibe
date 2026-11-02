@@ -19,9 +19,18 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url')
 }
 
+export interface TokenPayload {
+  sub: string
+  username: string
+  /** 服务端会话 id；无 sid 的老令牌仍可校验通过（兼容期） */
+  sid?: string
+  /** 签发时间（秒），用于和 password_changed_at 比对 */
+  iat?: number
+}
+
 /** 签发 JWT（HS256，手写，零依赖）。expiresInSeconds 默认 7 天，"记住我" 传 30 天 */
 export function signToken(
-  payload: { sub: string; username: string },
+  payload: TokenPayload,
   expiresInSeconds = 60 * 60 * 24 * 7,
 ): string {
   const header = { alg: 'HS256', typ: 'JWT' }
@@ -33,7 +42,7 @@ export function signToken(
 }
 
 /** 校验 JWT，失败返回 null */
-export function verifyToken(token: string): { sub: string; username: string } | null {
+export function verifyToken(token: string): TokenPayload | null {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
@@ -44,10 +53,12 @@ export function verifyToken(token: string): { sub: string; username: string } | 
     const body = JSON.parse(Buffer.from(p, 'base64url').toString()) as {
       sub: string
       username: string
+      sid?: string
+      iat?: number
       exp: number
     }
     if (body.exp < Math.floor(Date.now() / 1000)) return null
-    return { sub: body.sub, username: body.username }
+    return { sub: body.sub, username: body.username, sid: body.sid, iat: body.iat }
   } catch {
     return null
   }

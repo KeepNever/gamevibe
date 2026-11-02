@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { api, getToken, setToken } from '@/lib/api'
+import { api, setSessionHint } from '@/lib/api'
 import type { AuthUser } from '@/types/game'
 import { useGameStore } from './gameStore'
 
@@ -41,27 +41,32 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = d.user
     roles.value = d.roles ?? []
     permissions.value = d.permissions ?? []
+    setSessionHint(!!d.user)
   }
 
   function clearSession() {
-    setToken(null)
+    setSessionHint(false)
     user.value = null
     roles.value = []
     permissions.value = []
   }
 
+  /**
+   * 会话恢复
+   * 凭据在 httpOnly Cookie 里，JS 看不到，所以只能盲调一次 /auth/me：
+   *   - 有登录态 → 返回 authenticated:true + user
+   *   - 匿名 → 返回 200 + authenticated:false（不再是 401，避免每个访客控制台报错）
+   */
   async function fetchMe() {
-    const t = getToken()
-    if (!t) {
-      loading.value = false
-      markReady?.()
-      return
-    }
     try {
       const res = await api.get('/auth/me')
       const d = await res.json()
-      applySession(d)
-      useGameStore().initFromBackend()
+      if (d?.authenticated && d.user) {
+        applySession(d)
+        useGameStore().initFromBackend()
+      } else {
+        clearSession()
+      }
     } catch {
       clearSession()
     } finally {
@@ -73,7 +78,6 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(email: string, password: string, remember = false) {
     const res = await api.post('/auth/login', { email, password, remember })
     const d = await res.json()
-    setToken(d.token)
     applySession(d)
     // 延迟同步 store，确保 DOM 已提交
     setTimeout(() => useGameStore().initFromBackend(), 0)
@@ -82,13 +86,24 @@ export const useAuthStore = defineStore('auth', () => {
   async function register(username: string, email: string, password: string) {
     const res = await api.post('/auth/register', { username, email, password })
     const d = await res.json()
-    setToken(d.token)
     applySession(d)
     setTimeout(() => useGameStore().initFromBackend(), 0)
   }
 
-  function logout() {
+  /** 退出登录：先让服务端撤销会话，再清本地状态。只清本地等于令牌被抓走仍可用 */
+  async function logout() {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      /* 网络失败也要清本地，避免卡在「看起来还登录着」的状态 */
+    }
     clearSession()
+  }
+
+  /** 资料修改后局部刷新，避免整页重载 */
+  function patchUser(patch: Partial<AuthUser>) {
+    if (!user.value) return
+    user.value = { ...user.value, ...patch }
   }
 
   // 启动时恢复登录态
@@ -109,5 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
     register,
     logout,
     clearSession,
+    patchUser,
+    refresh: fetchMe,
   }
 })

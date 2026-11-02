@@ -174,6 +174,84 @@ onMounted(() => {
   loadUsers()
   loadMeta()
 })
+
+// ══ 审计日志 ══════════════════════════════════════════
+interface AuditRow {
+  id: number
+  actorName: string | null
+  action: string
+  targetType: string | null
+  targetId: string | null
+  detail: string | null
+  ip: string | null
+  result: string
+  created_at: number
+}
+
+const tab = ref<'users' | 'audit'>('users')
+const auditRows = ref<AuditRow[]>([])
+const auditTotal = ref(0)
+const auditPage = ref(1)
+const auditQ = ref('')
+const auditLoading = ref(false)
+const auditLabels = ref<Record<string, string>>({})
+const auditPageSize = 20
+const auditPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize)))
+
+async function loadAudit() {
+  auditLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      page: String(auditPage.value),
+      pageSize: String(auditPageSize),
+    })
+    if (auditQ.value.trim()) params.set('q', auditQ.value.trim())
+    const res = await api.get(`/admin/audit?${params}`)
+    const d = await res.json()
+    auditRows.value = d.items ?? []
+    auditTotal.value = d.total ?? 0
+    auditLabels.value = d.labels ?? {}
+  } catch (err: any) {
+    error.value = err instanceof ApiError ? err.message : '审计日志加载失败'
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+function switchTab(k: 'users' | 'audit') {
+  tab.value = k
+  if (k === 'audit') loadAudit()
+}
+
+function auditPageGo(p: number) {
+  auditPage.value = Math.min(auditPages.value, Math.max(1, p))
+  loadAudit()
+}
+
+/** 把 JSON 明细渲染成人能读的一句话 */
+function auditDetail(r: AuditRow): string {
+  if (!r.detail) return ''
+  try {
+    const d = JSON.parse(r.detail)
+    if (Array.isArray(d.changes) && d.changes.length) {
+      return d.changes
+        .map((c: any) => `${c.field}：${c.from ?? '空'} → ${c.to ?? '空'}`)
+        .join('；')
+    }
+    if (d.reason) return String(d.reason)
+    if (d.revokedSessions !== undefined) return `撤销会话 ${d.revokedSessions} 个`
+    if (d.to) return `目标：${d.to}`
+  } catch {
+    return r.detail.slice(0, 80)
+  }
+  return ''
+}
+
+function fmtTime(ts: number): string {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 </script>
 
 <template>
@@ -194,6 +272,24 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- 一级切换 -->
+    <div class="flex gap-1 mb-5 border-b border-[var(--border)]">
+      <button
+        v-for="t in [{ k: 'users', label: '用户管理' }, { k: 'audit', label: '审计日志' }]"
+        :key="t.k"
+        class="px-3.5 py-2.5 -mb-px text-sm border-b-2 transition-colors"
+        :class="
+          tab === t.k
+            ? 'border-accent text-accent'
+            : 'border-transparent text-[var(--text-faint)] hover:text-[var(--text-dim)]'
+        "
+        @click="switchTab(t.k as 'users' | 'audit')"
+      >
+        {{ t.label }}
+      </button>
+    </div>
+
+    <div v-show="tab === 'users'">
     <!-- 概览 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       <div class="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4">
@@ -400,5 +496,94 @@ onMounted(() => {
       规则：不能修改自己的角色或停用自己；不能操作与自己同级或更高权限的用户。
       角色变更立即生效，被改动者无需重新登录即可获得新权限（权限在每次请求时实时校验）。
     </p>
+    </div>
+
+    <!-- ══ 审计日志 ══ -->
+    <div v-show="tab === 'audit'">
+      <div class="flex items-center gap-2 mb-4">
+        <div
+          class="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] focus-within:border-accent/50 flex-1 max-w-sm"
+        >
+          <Search class="w-4 h-4 text-[var(--text-faint)]" />
+          <input
+            v-model="auditQ"
+            @keyup.enter="auditPageGo(1)"
+            placeholder="搜索操作人 / 动作 / 目标"
+            class="flex-1 bg-transparent text-sm text-[var(--text)] outline-none"
+          />
+        </div>
+        <button
+          class="px-3 py-2 rounded-xl bg-accent hover:bg-accent-strong text-white text-sm transition-colors"
+          @click="auditPageGo(1)"
+        >
+          搜索
+        </button>
+        <span class="text-xs text-[var(--text-faint)] ml-auto">共 {{ auditTotal }} 条</span>
+      </div>
+
+      <div class="bg-[var(--surface)] border border-[var(--border)] rounded-xl overflow-hidden">
+        <div v-if="auditLoading" class="flex items-center justify-center gap-2 py-16 text-sm text-[var(--text-faint)]">
+          <Loader2 class="w-4 h-4 animate-spin" /> 加载中…
+        </div>
+        <div v-else-if="!auditRows.length" class="py-16 text-center text-sm text-[var(--text-faint)]">
+          暂无审计记录
+        </div>
+        <div v-else class="divide-y divide-[var(--border)]">
+          <div
+            v-for="r in auditRows"
+            :key="r.id"
+            class="flex items-start gap-3 p-4 hover:bg-[var(--surface-2)]/50 transition-colors"
+          >
+            <span
+              class="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+              :class="r.result === 'ok' ? 'bg-accent-green' : 'bg-red-400'"
+            ></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm text-[var(--text)]">
+                  {{ auditLabels[r.action] || r.action }}
+                </span>
+                <span v-if="r.result !== 'ok'" class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
+                  失败
+                </span>
+                <span class="text-[10px] text-[var(--text-faint)]">
+                  {{ r.actorName || '匿名' }}
+                </span>
+              </div>
+              <p v-if="auditDetail(r)" class="text-xs text-[var(--text-faint)] mt-0.5 truncate">
+                {{ auditDetail(r) }}
+              </p>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-[11px] text-[var(--text-faint)]">{{ fmtTime(r.created_at) }}</div>
+              <div class="text-[10px] text-[var(--text-faint)]/70">{{ r.ip || '—' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="auditPages > 1" class="flex items-center justify-center gap-2 mt-5">
+        <button
+          class="p-2 rounded-lg border border-[var(--border)] text-[var(--text-dim)] disabled:opacity-40"
+          :disabled="auditPage <= 1"
+          @click="auditPageGo(auditPage - 1)"
+        >
+          <ChevronLeft class="w-4 h-4" />
+        </button>
+        <span class="text-xs text-[var(--text-faint)]">{{ auditPage }} / {{ auditPages }}</span>
+        <button
+          class="p-2 rounded-lg border border-[var(--border)] text-[var(--text-dim)] disabled:opacity-40"
+          :disabled="auditPage >= auditPages"
+          @click="auditPageGo(auditPage + 1)"
+        >
+          <ChevronRight class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-[var(--text-faint)] mt-6 leading-relaxed">
+        审计记录包含登录、改密、换绑、权限调整、停用/启用等敏感操作，成功与失败都会留痕。
+        记录中不含密码、令牌或验证码原文。
+      </p>
+    </div>
   </div>
 </template>

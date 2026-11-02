@@ -27,14 +27,13 @@ const ok = (name, cond, extra = '') => {
   console.log(`${cond ? '✅' : '❌'} ${name}${extra ? ' — ' + extra : ''}`)
 }
 
-async function loginToken(email) {
-  const r = await fetch(`${base}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: PASS }),
+// 鉴权已改为 httpOnly Cookie，页面 JS 读不到令牌，也就不能再往 localStorage 里塞。
+// 用 Playwright 的 context.request 登录，Cookie 会自动落在同一个 context 上。
+async function loginAs(context, email) {
+  const r = await context.request.post(`${base}/api/auth/login`, {
+    data: { email, password: PASS },
   })
-  const d = await r.json()
-  return d.token || ''
+  return r.ok()
 }
 
 // Playwright 自带的 Chromium 未安装（ms-playwright 目录下没有 chromium），
@@ -82,10 +81,8 @@ ok('未登录访问 /favorites 被拦截', urlBlocked.includes('/login'), urlBlo
 ok('拦截时带上回跳参数', urlBlocked.includes('redirect=%2Ffavorites') || urlBlocked.includes('redirect=/favorites'))
 
 // ── 3. 管理员进后台 ──────────────────────────────────
-const adminToken = await loginToken('老白不白@seed.local')
-ok('管理员账号可取到令牌', !!adminToken)
-await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
-await page.evaluate((t) => localStorage.setItem('gv_token', t), adminToken)
+const adminOk = await loginAs(ctx, '老白不白@seed.local')
+ok('管理员账号可登录（Cookie 会话）', adminOk)
 await page.goto(`${base}/admin`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1800)
 ok('管理员能打开 /admin', page.url().includes('/admin'), page.url())
@@ -101,9 +98,9 @@ ok('角色矩阵可展开', await page.locator('text=评论管理').count() > 0)
 await page.screenshot({ path: `${outDir}/04-admin-matrix.jpg`, type: 'jpeg', quality: 88 })
 
 // ── 4. 普通用户被挡 ──────────────────────────────────
-const userToken = await loginToken('阿坤Kun@seed.local')
-ok('普通用户可取到令牌', !!userToken)
-await page.evaluate((t) => localStorage.setItem('gv_token', t), userToken)
+await ctx.clearCookies()
+const userOk = await loginAs(ctx, '阿坤Kun@seed.local')
+ok('普通用户可登录（Cookie 会话）', userOk)
 await page.goto(`${base}/admin`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1200)
 const urlUser = page.url()
