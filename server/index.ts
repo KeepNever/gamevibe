@@ -22,6 +22,7 @@ import recommendations from './routes/recommendations.ts'
 import social from './routes/social.ts'
 import live from './routes/live.ts'
 import diag from './routes/diag.ts'
+import admin from './routes/admin.ts'
 import { rateLimit } from './middleware/rateLimit.ts'
 import { securityHeaders } from './middleware/securityHeaders.ts'
 
@@ -57,7 +58,7 @@ app.use(
       return ''
     },
     allowHeaders: ['Authorization', 'X-Auth-Token', 'Content-Type', 'X-Request-ID'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
     maxAge: 86400, // 预检缓存 24 小时
   }),
@@ -68,7 +69,13 @@ app.use(
 // ════════════════════════════════════════════════
 
 // 认证端点最严格：10 次/分钟（防暴力破解）
-app.use('/api/auth/*', rateLimit({ maxRequests: 10, windowMs: 60_000 }))
+// 例外：/api/auth/me 是会话恢复接口，页面每次刷新都会调用，
+// 若共用 10 次/分钟会在多标签页/连续切页时误伤登录态，故交回 60 次/分钟默认桶
+const strictAuthLimit = rateLimit({ maxRequests: 10, windowMs: 60_000 })
+app.use('/api/auth/*', async (c, next) => {
+  if (new URL(c.req.url).pathname === '/api/auth/me') return next()
+  return strictAuthLimit(c, next)
+})
 // AI 对话端点最贵（真实调用 LLM、流式长文本）：20 次/分钟
 app.use('/api/ai/chat', rateLimit({ maxRequests: 20, windowMs: 60_000 }))
 // AI 其余端点（精选 / 点评 / 口碑 / 画像，均带缓存）：60 次/分钟
@@ -115,6 +122,7 @@ app.route('/api/news', news)
 app.route('/api/stats', stats)
 app.route('/api/recommendations', recommendations)
 app.route('/api/social', social)
+app.route('/api/admin', admin)
 
 // ════════════════════════════════════════════════
 //  静态资源托管（同源部署前端，SPA fallback）

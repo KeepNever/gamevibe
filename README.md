@@ -115,6 +115,28 @@ Cover art is normalised per platform: Steam's `library_600x900_2x` (the non-`_2x
 
 Everything Steam offers (reviews, achievements, player counts) is indexed by `appid`, while the app uses its own ids. The mapping table is **85 entries, each individually verified** by calling `appdetails` and reading the returned name back. An earlier hand-written table contained five title/`appid` mismatches that caused the detail page to display *another game's* data — that class of bug is worse than missing data, so the table is now generated and audited by script (`scripts/auditSteamAppIds.mjs`), and `resolveSteamAppId()` returning `null` is treated as "this game genuinely has no Steam data".
 
+## 🔐 Accounts & permissions (RBAC)
+
+Registration is open and immediately active — no approval queue. Every new account is granted the `user` role at sign-up.
+
+**Three-tier roles**, where `roles.level` decides who may act on whom:
+
+| Role | Level | Scope |
+|---|---|---|
+| `admin` | 100 | everything |
+| `moderator` | 50 | read / delete / moderate any review, list users |
+| `user` | 10 | own content only |
+
+**Seven permission keys** grouped by resource (`review.*`, `user.*`, `content.manage`, `admin.access`), stored across `permissions` / `role_permissions` / `user_roles` — a real join-table model rather than a boolean flag on the user row.
+
+**Guards run twice.** The router blocks navigation to protected pages (`meta.requiresAuth` / `meta.permission`) and redirects with `?redirect=` so the user lands where they originally intended; the API re-checks every permission server-side on each request, so a tampered frontend buys nothing.
+
+**"You can't act on your equals."** An admin cannot demote another admin, change their own role, or disable their own account. The UI disables those controls and the API rejects them independently.
+
+**Sessions & abuse control** — JWT (HS256), 7-day expiry, or 30 days with "remember me". Failed logins are counted **per account** (5 within 15 minutes → 429), separate from the global per-IP limiter, so slow credential stuffing is stopped without locking out everyone behind one office IP.
+
+**Password reset, two channels** — with `RESEND_API_KEY` set the link is emailed; without it the endpoint returns the link in the response and the UI labels it "demo mode" instead of pretending an email went out. Tokens are stored as SHA-256 hashes, expire in 30 minutes and are single-use.
+
 ---
 
 ## 🚀 Quick start
@@ -233,6 +255,22 @@ Steam 另有一个 0–9 档的 `review_score`，折算成百分比会和同一�
 四平台全部使用**免密钥**官方接口（见上文英文表格），各自 10 分钟 TTL 缓存、**失败不缓存**、平台间独立降级。国内 / 沙箱环境的出网情况与线上差异很大，因此出网探测一律走 `/api/diag/egress` 实时判定，并把结果分成三档：`healthy`（通）、`needsAuth`（网络通但缺凭证，401/403）、`blocked`（连不上）——把 401 误读成「被墙」正是早期一次误判的根因。
 
 免密钥检索接口的一个真实限制：**只能按名字搜，不能按标签搜**。用 `term=pixel` 查会返回《Pixel Gun 3D》而不是《星露谷物语》。因此纯口味型提问不搜全网，改走站内标签映射，避免拿噪声结果糊弄用户——这条边界在 UI 上也是明说的。
+
+## 账号与权限（RBAC）
+
+开放注册、注册完即时可用，不需要审核排队。新账号自动获得 `user` 角色。
+
+三级角色，`roles.level` 决定「谁能管谁」：`admin`（100）全权、`moderator`（50）可审核与删除任意评论、`user`（10）只能动自己的内容。
+
+七个权限点按资源分组（`review.*` / `user.*` / `content.manage` / `admin.access`），落在 `permissions`、`role_permissions`、`user_roles` 三张关联表里——是真的角色-权限模型，不是 users 表上一个布尔字段。
+
+**守卫做两层**：路由层拦导航（`meta.requiresAuth` / `meta.permission`），被拦时带 `?redirect=` 回跳，登录后回到原页面；接口层每次请求重新校验权限，改前端没有用。
+
+**不能操作同级或更高**：管理员不能降级另一个管理员，不能改自己的角色，也不能停用自己。界面上这些控件直接禁用，接口也会独立拒绝。
+
+**会话与撞库防护**：JWT（HS256）默认 7 天，「记住我」30 天。登录失败按**账号**计数（15 分钟内 5 次 → 429），与按 IP 的全局限流分开，避免整间办公室共用一个出口 IP 时被连坐。
+
+**找回密码双通道**：配了 `RESEND_API_KEY` 就走真实发信；没配则接口直接把重置链接返回、界面明确标注「演示模式」，不假装邮件已发出。令牌只存 SHA-256 哈希，30 分钟过期，一次性使用。
 
 ## 本地运行
 

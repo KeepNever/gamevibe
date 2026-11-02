@@ -4,7 +4,7 @@ import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Home, Search, Bot, Scale, Heart, Gamepad2, Grid, Trophy,
   BadgePercent, Sun, Moon, MoreHorizontal, X, Sparkles,
-  Library, LogOut, User, Newspaper, BarChart, Users, Rss, Bell
+  Library, LogOut, User, Newspaper, BarChart, Users, Rss, Bell, ShieldCheck
 } from 'lucide-vue-next'
 import { useGameStore } from '@/stores/gameStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -179,6 +179,11 @@ watch(() => route.path, () => { if (auth.isLoggedIn) loadUnreadCount() })
                   class="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
                   @click="userMenuOpen = false">
                   <Heart class="w-4 h-4" /> 收藏 ({{ gameStore.favorites.length }})
+                </RouterLink>
+                <RouterLink v-if="auth.isAdmin" to="/admin"
+                  class="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
+                  @click="userMenuOpen = false">
+                  <ShieldCheck class="w-4 h-4" /> 用户与权限
                 </RouterLink>
                 <button @click="handleLogout" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-accent-red hover:bg-red-5/10 transition-colors">
                   <LogOut class="w-4 h-4" /> 退出登录

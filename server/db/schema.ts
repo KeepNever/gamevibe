@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT,
   avatar       TEXT,
   bio          TEXT,
+  status       TEXT NOT NULL DEFAULT 'active',
   created_at   INTEGER NOT NULL
 );
 
@@ -123,4 +124,66 @@ CREATE TABLE IF NOT EXISTS profile_batches (
 
 CREATE INDEX IF NOT EXISTS idx_game_profiles_active ON game_profiles(game_id, batch_id);
 CREATE INDEX IF NOT EXISTS idx_game_profiles_batch  ON game_profiles(batch_id);
+
+-- ══ RBAC 角色权限 ═══════════════════════════════════════════════
+-- 角色：admin / moderator / user，level 用于「不能操作同级或更高」的判断
+CREATE TABLE IF NOT EXISTS roles (
+  id          TEXT PRIMARY KEY,
+  key         TEXT UNIQUE NOT NULL,
+  name        TEXT NOT NULL,
+  description TEXT,
+  level       INTEGER NOT NULL DEFAULT 0,
+  is_system   INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+
+-- 权限点：细到动作，key 形如 resource.action[.scope]
+CREATE TABLE IF NOT EXISTS permissions (
+  id          TEXT PRIMARY KEY,
+  key         TEXT UNIQUE NOT NULL,
+  name        TEXT NOT NULL,
+  group_name  TEXT NOT NULL,
+  description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id       TEXT NOT NULL,
+  permission_id TEXT NOT NULL,
+  PRIMARY KEY (role_id, permission_id),
+  FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+  FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id    TEXT NOT NULL,
+  role_id    TEXT NOT NULL,
+  granted_at INTEGER NOT NULL,
+  granted_by TEXT,
+  PRIMARY KEY (user_id, role_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
+
+-- 密码重置令牌：只存哈希，原文不落库
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at    INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pwreset_hash ON password_resets(token_hash);
+
+-- 登录尝试：按账号维度限流，防慢速撞库（区别于全站 IP 限流）
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  email      TEXT NOT NULL,
+  ip         TEXT,
+  success    INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_email ON login_attempts(email, created_at DESC);
 `

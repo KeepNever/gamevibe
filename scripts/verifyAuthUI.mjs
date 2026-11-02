@@ -1,0 +1,123 @@
+// 登录 / 权限 实机验证（Playwright）
+// 用法：node scripts/verifyAuthUI.mjs [base]
+// 断言：登录页要素、未登录拦截带回跳、管理员可进后台、普通用户被挡回首页
+
+import { chromium } from 'playwright'
+import { mkdirSync, readFileSync } from 'node:fs'
+
+for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'https_proxy', 'http_proxy', 'all_proxy']) {
+  delete process.env[k]
+}
+
+const base = process.argv[2] || 'http://127.0.0.1:8792'
+const outDir = 'D:/GameVibe/gamevibe/.probe/auth'
+mkdirSync(outDir, { recursive: true })
+
+// 演示密码以种子脚本为准，别硬编码
+const seedSrc = readFileSync('D:/GameVibe/gamevibe/scripts/seedSocial.mjs', 'utf8')
+const PASS = /const PASS = '([^']+)'/.exec(seedSrc)?.[1] || ''
+if (!PASS) {
+  console.error('[fatal] 未能从 seedSocial.mjs 读到演示密码')
+  process.exit(1)
+}
+
+const results = []
+const ok = (name, cond, extra = '') => {
+  results.push({ name, pass: !!cond, extra })
+  console.log(`${cond ? '✅' : '❌'} ${name}${extra ? ' — ' + extra : ''}`)
+}
+
+async function loginToken(email) {
+  const r = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: PASS }),
+  })
+  const d = await r.json()
+  return d.token || ''
+}
+
+// Playwright 自带的 Chromium 未安装（ms-playwright 目录下没有 chromium），
+// 直接复用系统 Chrome，避免为了跑一次验证去下载上百 MB
+const browser = await chromium.launch({ channel: 'chrome', args: ['--no-proxy-server'] })
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 950 },
+  deviceScaleFactor: 1.5,
+  locale: 'zh-CN',
+})
+const page = await ctx.newPage()
+const errs = []
+page.on('pageerror', (e) => errs.push(e.message))
+
+// ── 1. 登录页要素 ────────────────────────────────────
+await page.goto(`${base}/login`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(600)
+ok('登录页含「记住我」', await page.locator('text=记住我').count() > 0)
+ok('登录页含「忘记密码」入口', await page.locator('text=忘记密码').count() > 0)
+ok('密码可见切换按钮存在', await page.locator('button[title="显示密码"]').count() > 0)
+
+// 密码可见：点开后 input type 变 text
+await page.fill('input[type="email"]', 'someone@test.local')
+await page.fill('input[type="password"]', 'abc12345')
+await page.click('button[title="显示密码"]')
+await page.waitForTimeout(200)
+const typeAfter = await page.locator('input[autocomplete="current-password"]').getAttribute('type')
+ok('点击眼睛后明文显示', typeAfter === 'text', `type=${typeAfter}`)
+await page.screenshot({ path: `${outDir}/01-login.jpg`, type: 'jpeg', quality: 88 })
+
+// 即时校验：填非法邮箱后失焦
+await page.fill('input[type="email"]', 'bad-email')
+await page.locator('input[type="email"]').blur()
+await page.waitForTimeout(300)
+ok('非法邮箱即时提示', await page.locator('text=邮箱格式不正确').count() > 0)
+await page.screenshot({ path: `${outDir}/02-login-validation.jpg`, type: 'jpeg', quality: 88 })
+
+// ── 2. 未登录访问受保护页 ─────────────────────────────
+await page.goto(`${base}/favorites`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(500)
+const urlBlocked = page.url()
+ok('未登录访问 /favorites 被拦截', urlBlocked.includes('/login'), urlBlocked)
+ok('拦截时带上回跳参数', urlBlocked.includes('redirect=%2Ffavorites') || urlBlocked.includes('redirect=/favorites'))
+
+// ── 3. 管理员进后台 ──────────────────────────────────
+const adminToken = await loginToken('老白不白@seed.local')
+ok('管理员账号可取到令牌', !!adminToken)
+await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
+await page.evaluate((t) => localStorage.setItem('gv_token', t), adminToken)
+await page.goto(`${base}/admin`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1800)
+ok('管理员能打开 /admin', page.url().includes('/admin'), page.url())
+ok('后台标题渲染', await page.locator('text=用户与权限').count() > 0)
+const rowCount = await page.locator('select').count()
+ok('用户列表渲染出角色下拉', rowCount > 0, `${rowCount} 行`)
+await page.screenshot({ path: `${outDir}/03-admin.jpg`, type: 'jpeg', quality: 88 })
+
+// 角色矩阵展开
+await page.click('text=查看角色矩阵').catch(() => {})
+await page.waitForTimeout(800)
+ok('角色矩阵可展开', await page.locator('text=评论管理').count() > 0)
+await page.screenshot({ path: `${outDir}/04-admin-matrix.jpg`, type: 'jpeg', quality: 88 })
+
+// ── 4. 普通用户被挡 ──────────────────────────────────
+const userToken = await loginToken('阿坤Kun@seed.local')
+ok('普通用户可取到令牌', !!userToken)
+await page.evaluate((t) => localStorage.setItem('gv_token', t), userToken)
+await page.goto(`${base}/admin`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1200)
+const urlUser = page.url()
+ok('普通用户进 /admin 被挡回首页', !urlUser.includes('/admin'), urlUser)
+
+// ── 5. 忘记密码页 ────────────────────────────────────
+await page.goto(`${base}/forgot-password`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(600)
+ok('忘记密码页可访问', await page.locator('text=找回密码').count() > 0)
+await page.screenshot({ path: `${outDir}/05-forgot.jpg`, type: 'jpeg', quality: 88 })
+
+ok('页面无 JS 运行时错误', errs.length === 0, errs.slice(0, 3).join(' | '))
+
+await browser.close()
+
+const passed = results.filter((r) => r.pass).length
+console.log(`\n═══ ${passed}/${results.length} 通过 ═══`)
+console.log(`截图：${outDir}`)
+process.exit(passed === results.length ? 0 : 1)

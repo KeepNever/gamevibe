@@ -19,11 +19,14 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url')
 }
 
-/** 签发 JWT（HS256，手写，零依赖） */
-export function signToken(payload: { sub: string; username: string }): string {
+/** 签发 JWT（HS256，手写，零依赖）。expiresInSeconds 默认 7 天，"记住我" 传 30 天 */
+export function signToken(
+  payload: { sub: string; username: string },
+  expiresInSeconds = 60 * 60 * 24 * 7,
+): string {
   const header = { alg: 'HS256', typ: 'JWT' }
   const now = Math.floor(Date.now() / 1000)
-  const body = { ...payload, iat: now, exp: now + 60 * 60 * 24 * 7 } // 7 天过期
+  const body = { ...payload, iat: now, exp: now + expiresInSeconds }
   const data = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(body))}`
   const sig = createHmac('sha256', env.JWT_SECRET).update(data).digest('base64url')
   return `${data}.${sig}`

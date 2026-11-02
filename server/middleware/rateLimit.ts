@@ -51,7 +51,10 @@ export function rateLimit(opts?: RateLimitOptions) {
       'unknown'
 
     const pathPrefix = new URL(c.req.url).pathname.split('/').slice(0, 4).join('/')
-    const key = `${ip}:${pathPrefix}`
+    // 同一路径可能同时命中多条规则（/api/auth/login 既属于 /api/auth/* 也属于 /api/*）。
+    // 若共用同一个桶，每个请求会被重复计数，实际配额只剩配置值的一半
+    // （10/min 的认证限流因此变成 5/min）。把限额并入 key，让每条规则独立计数。
+    const key = `${ip}:${pathPrefix}:${max}`
 
     const now = Date.now()
     let bucket = buckets.get(key)
