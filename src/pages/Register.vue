@@ -9,6 +9,7 @@ import {
   ArrowRight,
   Loader2,
   AlertCircle,
+  Info,
   Eye,
   EyeOff,
 } from 'lucide-vue-next'
@@ -206,6 +207,14 @@ async function submit() {
         <p class="text-center text-xs text-[var(--text-faint)]">
           注册即表示同意本平台的使用条款与隐私说明
         </p>
+
+        <!-- 演示站如实告知：沙箱数据库在每次发布时被本地快照覆盖，账号不会长期保留 -->
+        <div
+          class="flex items-start gap-2 text-[11px] leading-relaxed text-amber-400/90 bg-amber-500/10 rounded-lg px-3 py-2"
+        >
+          <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>这是演示站点：账号数据会在站点更新后重置，请不要使用你在其他地方的常用密码。</span>
+        </div>
       </form>
 
       <p class="text-center text-sm text-[var(--text-faint)] mt-4">

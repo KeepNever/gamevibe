@@ -68,6 +68,12 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     } catch {
       /* 忽略解析错误 */
     }
+    // 账号被管理员停用：403 里的其余情况（权限不足）不能登出，否则普通用户点一下
+    // 管理入口就被踢掉；只有明确的 ACCOUNT_DISABLED 才清会话
+    if (res.status === 403 && code === 'ACCOUNT_DISABLED') {
+      setToken(null)
+      handleSessionExpired()
+    }
     throw new ApiError(msg, res.status, code, remaining)
   }
   return res

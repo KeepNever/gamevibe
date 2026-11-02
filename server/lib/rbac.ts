@@ -56,6 +56,18 @@ export function hasPermission(userId: string, perm: string): boolean {
   return !!row
 }
 
+/**
+ * 账号状态：token 只证明「签发时这个人存在」，不证明「现在还能用」。
+ * 管理员停用某人后，对方手里的旧 token 必须立刻失去业务访问能力，否则停用形同虚设。
+ */
+export function getAccountState(userId: string): 'active' | 'disabled' | 'missing' {
+  const row = db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as
+    | { status: string | null }
+    | undefined
+  if (!row) return 'missing'
+  return row.status === 'disabled' ? 'disabled' : 'active'
+}
+
 /** 用户最高角色等级（无角色为 0）。用于「不能管理同级或更高权限的人」 */
 export function getMaxLevel(userId: string): number {
   const row = db

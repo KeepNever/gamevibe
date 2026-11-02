@@ -1,6 +1,6 @@
 import { createMiddleware } from 'hono/factory'
 import { verifyToken } from '../lib/crypto.ts'
-import { hasPermission } from '../lib/rbac.ts'
+import { hasPermission, getAccountState } from '../lib/rbac.ts'
 
 // 在 Hono 上下文中注入 userId / username
 export const authMiddleware = createMiddleware<{
@@ -18,6 +18,16 @@ export const authMiddleware = createMiddleware<{
   const payload = verifyToken(token)
   if (!payload) {
     return c.json({ error: '令牌无效或已过期，请重新登录' }, 401)
+  }
+  // 令牌只证明「签发时这个人存在」，不证明「现在还能用」。
+  // 实测过：不加这一步，管理员停用某人后，对方手里的旧 token 仍能正常读列表、
+  // 发评论、关注他人（只有 /auth/me 自己查了状态），最长可撑到 token 过期（记住我 30 天）。
+  const state = getAccountState(payload.sub)
+  if (state === 'missing') {
+    return c.json({ error: '账号不存在，请重新登录', code: 'ACCOUNT_MISSING' }, 401)
+  }
+  if (state === 'disabled') {
+    return c.json({ error: '账号已被停用', code: 'ACCOUNT_DISABLED' }, 403)
   }
   c.set('userId', payload.sub)
   c.set('username', payload.username)
