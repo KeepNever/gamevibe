@@ -188,6 +188,16 @@ docker run -d --env-file .env -p 8792:8792 gamevibe
 
 On any container host: build `npm install && npm run build`, start `node --no-warnings server/index.ts`, expose port `8792`, and set the env vars above. Outbound-network policy matters — the app ships `/api/diag/egress`, `/api/diag/realtime` and `/api/diag/providers` endpoints that classify each upstream as `healthy` / `needsAuth` / `blocked`, because an unreachable endpoint and a missing credential look identical from the UI otherwise.
 
+### ⚠️ Persistence on the public demo
+
+The demo instance runs on an ephemeral sandbox where **the deployment uploads the local `server/db/data/gamevibe.db` as a snapshot on every release**. Measured behaviour, not a guess: an account registered on the live site is gone after the next deploy (login returns 401), and a marker row inserted into the *local* database appears on the live site after deployment.
+
+Practical consequences:
+
+- The local database is the source of truth. If you want a demo account to survive releases, create it locally and redeploy.
+- Accounts created by visitors are valid until the next deployment. Treat the public link as a showcase, not as durable storage.
+- For real user data, point the data layer at an external database. A single SQLite file inside the sandbox cannot persist across releases.
+
 ---
 
 ## 🧪 Quality gates
@@ -285,6 +295,16 @@ npm run dev                   # 前端 :5173，/api 代理到 8792
 演示账号：`<任意种子用户名>@seed.local`（例：`糖糖不吃糖@seed.local`），密码 `seedpass1234`。
 
 > **本机开发提示**：如果所在网络需要代理才能访问外网，Node 直连 Steam 可能被墙，需要在启动后端时临时注入 `HTTPS_PROXY` 与 `NODE_USE_ENV_PROXY`。这两个变量**不要写进 `.env`**（会被带到线上并干扰 LLM 出口）。相关排查经验全部记在 `docs/` 下。
+
+### ⚠️ 线上演示站的数据不持久
+
+演示实例跑在临时沙箱里，**每次发布都会把本地的 `server/db/data/gamevibe.db` 作为快照上传覆盖**。这是实测结论，不是推测：线上注册的账号在下次发布后登录返回 401（已消失），而在**本地**库里插入的标记行在发布后出现在了线上。
+
+所以：
+
+- **本地数据库才是母版**。想让某个演示账号长期存在，就在本地建好再发布。
+- 访客注册的账号只在下次发布前有效。公开链接当展示用，别当正式存储。
+- 要承载真实用户数据，得把数据层换成外部数据库——沙箱里的单个 SQLite 文件扛不过一次发布。
 
 ## 目录结构
 
