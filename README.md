@@ -11,7 +11,8 @@
 [![Tailwind](https://img.shields.io/badge/Tailwind-v4-38bdf8?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Hono](https://img.shields.io/badge/Hono-4-e36002?logo=hono&logoColor=white)](https://hono.dev)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A522-5fa04e?logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003b57?logo=sqlite&logoColor=white)](https://nodejs.org/api/sqlite.html)
+[![CI](https://github.com/KeepNever/gamevibe/actions/workflows/ci.yml/badge.svg)](https://github.com/KeepNever/gamevibe/actions/workflows/ci.yml)
+[![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite%20%7C%20Turso-003b57?logo=sqlite&logoColor=white)](https://nodejs.org/api/sqlite.html)
 
 **[🔗 Live Demo](https://7fe3227e96e54b979531a0c7f7024f34.app.workbuddy.host/)** · [中文说明](#-中文说明) · [Screenshots](#-screenshots)
 
@@ -35,8 +36,10 @@ The guiding rule of the whole project: **the model never touches facts.** Every 
 | 🧠 **Anti-hallucination AI** | 3 structural patterns (citation / numeric / link back-fill) so the model can never fabricate a fact |
 | 🏆 **Global achievement board** | Real unlock rates parsed from Steam Community, graded into 5 difficulty tiers |
 | 🚫 **No fake data, ever** | Unavailable ⇒ `available: false` + a human-readable reason. Mock fallbacks were deliberately deleted |
-| 🗄️ **Zero-dependency backend** | Node's built-in `node:sqlite`, JWT + scrypt, SSE streaming — no Postgres, no Redis, no ORM |
+| 🗄️ **Pluggable storage** | Same SQL against two backends: `node:sqlite` locally, **Turso (libSQL) in production** — data survives releases. No Postgres, no Redis, no ORM |
+| 🛡️ **Real anti-abuse** | Cloudflare Turnstile on registration (server-side verified, fail-closed), scrypt + httpOnly cookie sessions, RBAC, full audit trail |
 | 📦 **One process = whole app** | The same server hosts the API and the built SPA; Dockerfile included |
+| 🔁 **130+ assertions in CI** | Every push runs typechecks + 3 regression suites (community / account lifecycle / login UI) on a real server with a real browser |
 
 ---
 
@@ -196,15 +199,13 @@ docker run -d --env-file .env -p 8792:8792 gamevibe
 
 On any container host: build `npm install && npm run build`, start `node --no-warnings server/index.ts`, expose port `8792`, and set the env vars above. Outbound-network policy matters — the app ships `/api/diag/egress`, `/api/diag/realtime` and `/api/diag/providers` endpoints that classify each upstream as `healthy` / `needsAuth` / `blocked`, because an unreachable endpoint and a missing credential look identical from the UI otherwise.
 
-### ⚠️ Persistence on the public demo
+### ✅ Persistence on the public demo (solved)
 
-The demo instance runs on an ephemeral sandbox where **the deployment uploads the local `server/db/data/gamevibe.db` as a snapshot on every release**. Measured behaviour, not a guess: an account registered on the live site is gone after the next deploy (login returns 401), and a marker row inserted into the *local* database appears on the live site after deployment.
+It used to be broken — and honestly documented here: the sandbox re-uploaded the local SQLite file on every release, wiping visitor accounts. That section existed as a warning; now it's a changelog entry.
 
-Practical consequences:
+The storage layer is a thin facade (`server/db/driver.ts`): when `TURSO_DATABASE_URL` is configured, every query goes to a hosted **Turso (libSQL)** database over HTTPS; without it, the same SQL runs on the local `node:sqlite` file. Migrations, seeds and demo-data bootstrapping stay local-only. The production demo therefore keeps accounts, reviews, follows and notifications across releases.
 
-- The local database is the source of truth. If you want a demo account to survive releases, create it locally and redeploy.
-- Accounts created by visitors are valid until the next deployment. Treat the public link as a showcase, not as durable storage.
-- For real user data, point the data layer at an external database. A single SQLite file inside the sandbox cannot persist across releases.
+Latency was the trade-off (one ~200 ms round-trip per query from the sandbox), so the hot paths were reworked: auth resolves session + account state in one JOIN, the recommendation pipeline fetches its inputs in parallel with de-duplicated queries, and batch metadata is TTL-cached. Measured medians: notifications 1068 → ~400 ms, personalized recommendations 1718 → ~830 ms.
 
 ---
 
@@ -221,9 +222,12 @@ No test framework — instead, self-contained verification scripts driven by a r
 | `smokeAI.ts` | 23 end-to-end AI assertions (with 429 back-off) |
 | `verifyExploreUI.mjs` | explore page: card count, broken-image count, image resolution |
 | `verifyFirstScreen.mjs` | AI features genuinely visible above the fold, logged out |
+| `verifyCommunity.mjs` | 14 assertions on the community loop: fan gets notified on a followee's review, report → moderator delete → author notified → audit trail |
 | `auditSteamAppIds.mjs` | re-verifies the whole app-id table against Steam |
 
 Type safety: `npm run server:typecheck` plus `vue-tsc` during build, both clean.
+
+All of the above run automatically on every push via GitHub Actions (typechecks → build → boot the server on local SQLite → run the API suites → run the browser suite on bundled Chromium).
 
 ---
 
@@ -276,6 +280,12 @@ Steam 另有一个 0–9 档的 `review_score`，折算成百分比会和同一�
 
 免密钥检索接口的一个真实限制：**只能按名字搜，不能按标签搜**。用 `term=pixel` 查会返回《Pixel Gun 3D》而不是《星露谷物语》。因此纯口味型提问不搜全网，改走站内标签映射，避免拿噪声结果糊弄用户——这条边界在 UI 上也是明说的。
 
+## 数据持久与防刷
+
+- **Turso（libSQL）托管库**：同一套 SQL 双后端，线上数据跨发布保留，本地无配置也能跑
+- **Cloudflare Turnstile**：注册强制人机验证，服务端 siteverify 校验（fail-closed），伪造 token 被真实拒绝
+- **审计日志**：登录、改密、换绑、权限调整、举报处理全部留痕，不含密码与令牌原文
+
 ## 账号与权限（RBAC）
 
 开放注册、注册完即时可用，不需要审核排队。新账号自动获得 `user` 角色。
@@ -314,15 +324,13 @@ npm run dev                   # 前端 :5173，/api 代理到 8792
 
 > **本机开发提示**：如果所在网络需要代理才能访问外网，Node 直连 Steam 可能被墙，需要在启动后端时临时注入 `HTTPS_PROXY` 与 `NODE_USE_ENV_PROXY`。这两个变量**不要写进 `.env`**（会被带到线上并干扰 LLM 出口）。相关排查经验全部记在 `docs/` 下。
 
-### ⚠️ 线上演示站的数据不持久
+### ✅ 线上演示站的数据持久（已解决）
 
-演示实例跑在临时沙箱里，**每次发布都会把本地的 `server/db/data/gamevibe.db` 作为快照上传覆盖**。这是实测结论，不是推测：线上注册的账号在下次发布后登录返回 401（已消失），而在**本地**库里插入的标记行在发布后出现在了线上。
+这个问题曾经真实存在，也曾在这里如实挂过警告：沙箱每次发布都会用本地 SQLite 文件覆盖线上，访客注册的账号发布即蒸发。
 
-所以：
+现在的数据层是一个薄门面（`server/db/driver.ts`）：配置了 `TURSO_DATABASE_URL` 时，所有查询走托管 **Turso（libSQL）** 数据库（HTTPS）；不配置时同一套 SQL 落在本地 `node:sqlite` 文件上。迁移、种子和演示数据灌装只在本地执行。生产演示站的账号、评论、关注与通知现在可以跨发布保留。
 
-- **本地数据库才是母版**。想让某个演示账号长期存在，就在本地建好再发布。
-- 访客注册的账号只在下次发布前有效。公开链接当展示用，别当正式存储。
-- 要承载真实用户数据，得把数据层换成外部数据库——沙箱里的单个 SQLite 文件扛不过一次发布。
+代价是延迟（沙箱到库每次查询一个 ~200ms 往返），所以热点路径做了治理：鉴权一次 JOIN 拿齐会话与账号状态、推荐管线并行取数且事件查询去重、批次元数据加 TTL 缓存。实测中位数：通知 1068 → 约 400ms，个性化推荐 1718 → 约 830ms。
 
 ## 目录结构
 
@@ -358,8 +366,11 @@ gamevibe/
 | `smokeAI.ts` | 23 条：AI 端到端（带 429 退避） |
 | `verifyExploreUI.mjs` | 探索页卡片数、破图数、图片分辨率 |
 | `verifyFirstScreen.mjs` | 未登录状态下首屏 AI 能力是否真的可见 |
+| `verifyCommunity.mjs` | 14 条：粉丝收到关注对象的新评测通知、举报→版主删除→作者收通知→审计留痕的社区闭环 |
 
 类型检查（`npm run server:typecheck` + 构建期 `vue-tsc`）全绿。
+
+以上全部通过 GitHub Actions 在每次 push 时自动执行：类型检查 → 构建 → 本地 SQLite 起服务 → API 回归三套 → 内置 Chromium 跑浏览器回归。
 
 ## 许可
 
