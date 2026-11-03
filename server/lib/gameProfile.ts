@@ -63,26 +63,43 @@ interface ProfileCache {
 let cache: ProfileCache = { batchId: null, map: new Map() }
 
 /** 查询当前激活（且已冻结）的批次 id；异常时返回 null */
+// batchId 变化极慢（画像批次冻结后才轮转），短 TTL 缓存把同页面多次调用的
+// batchId 查询从每调用一次 RTT 降为约零——远程库下这省的是整页延迟
+let batchIdCache: { value: string | null; until: number } | null = null
+const BATCH_ID_TTL_MS = 10_000
+
 export async function getActiveBatchId(): Promise<string | null> {
+  if (batchIdCache && batchIdCache.until > Date.now()) return batchIdCache.value
   try {
     const row = await db
       .prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1")
       .get() as { batch_id?: string } | undefined
-    return row?.batch_id ?? null
+    const value = row?.batch_id ?? null
+    batchIdCache = { value, until: Date.now() + BATCH_ID_TTL_MS }
+    return value
   } catch {
+    batchIdCache = { value: null, until: Date.now() + BATCH_ID_TTL_MS }
     return null
   }
 }
 
 /** 批次溯源信息（供画像接口展示「数据从哪来」） */
+// 批次信息短缓存（10s）：一次推荐会话里 profileSource 会被调用多次，
+// 远程库下每次两连查就是数百毫秒——批次冻结后才变化，缓存是安全的
+let batchInfoCache: { value: ActiveBatchInfo | null; until: number } | null = null
+
 export async function getActiveBatchInfo(): Promise<ActiveBatchInfo | null> {
+  if (batchInfoCache && batchInfoCache.until > Date.now()) return batchInfoCache.value
   try {
     const row = await db
       .prepare("SELECT * FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1")
       .get() as any
-    if (!row) return null
+    if (!row) {
+      batchInfoCache = { value: null, until: Date.now() + 10_000 }
+      return null
+    }
     const cnt = await db.prepare('SELECT COUNT(*) AS c FROM game_profiles WHERE batch_id=?').get(row.batch_id) as any
-    return {
+    const value: ActiveBatchInfo = {
       batchId: row.batch_id,
       model: row.model ?? null,
       promptVersion: row.prompt_version ?? null,
@@ -91,7 +108,10 @@ export async function getActiveBatchInfo(): Promise<ActiveBatchInfo | null> {
       verifiedCount: row.verified_count ?? 0,
       coverage: cnt.c,
     }
+    batchInfoCache = { value, until: Date.now() + 10_000 }
+    return value
   } catch {
+    batchInfoCache = { value: null, until: Date.now() + 10_000 }
     return null
   }
 }

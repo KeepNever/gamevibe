@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory'
 import { verifyToken } from '../lib/crypto.ts'
 import { hasPermission, getAccountState } from '../lib/rbac.ts'
 import { db } from '../db/index.ts'
-import { readSessionCookie, getSession, isSessionAlive, touchSession } from '../lib/session.ts'
+import { readSessionCookie, isSessionAlive, touchSession, type SessionRow } from '../lib/session.ts'
 
 /**
  * 鉴权中间件
@@ -53,8 +53,30 @@ export async function resolveIdentity(c: any): Promise<ResolveResult> {
   let legacy = true
 
   if (payload.sid) {
-    const s = (await getSession(db, payload.sid))
-    if (!isSessionAlive(s)) {
+    // 一次 JOIN 同时拿会话与账号状态（远程库下省掉 getAccountState 的第二次往返）
+    const row = (await db
+      .prepare(
+        `SELECT s.*, u.username AS username,
+                u.status AS user_status, u.deleted_at AS user_deleted_at
+           FROM sessions s LEFT JOIN users u ON u.id = s.user_id
+          WHERE s.id = ?`,
+      )
+      .get(payload.sid) as
+      | (SessionRow & { user_status: string | null; user_deleted_at: number | null })
+      | undefined) as any
+
+    const s: SessionRow | undefined = row
+      ? ({
+          id: row.id,
+          user_id: row.user_id,
+          username: row.username,
+          last_seen_at: row.last_seen_at,
+          revoked_at: row.revoked_at,
+          expires_at: row.expires_at,
+        } as SessionRow)
+      : undefined
+
+    if (!isSessionAlive(s ?? null)) {
       return {
         ok: false,
         status: 401,
@@ -62,26 +84,34 @@ export async function resolveIdentity(c: any): Promise<ResolveResult> {
       }
     }
     // 以会话记录为准，避免令牌里的冗余字段和真实账号漂移
-    userId = String(s.user_id)
-    if (s.username) username = String(s.username)
+    userId = String(s!.user_id)
+    if (s!.username) username = String(s!.username)
     legacy = false
-    touchSession(db, s)
-  }
 
-  // 账号状态：不存在 / 已注销 / 已停用
-  const state = (await getAccountState(userId))
-  if (state === 'missing') {
-    return { ok: false, status: 401, body: { error: '账号不存在，请重新登录', code: 'ACCOUNT_MISSING' } }
-  }
-  if (state === 'disabled') {
-    return { ok: false, status: 403, body: { error: '账号已被停用', code: 'ACCOUNT_DISABLED' } }
-  }
-  if (state === 'deleted') {
-    return {
-      ok: false,
-      status: 401,
-      body: { error: '账号已注销', code: 'ACCOUNT_DELETED' },
+    // 账号状态（同一行已带出）：不存在 / 已注销 / 已停用
+    const state = !row?.user_status
+      ? 'missing'
+      : row.user_deleted_at
+        ? 'deleted'
+        : row.user_status === 'disabled'
+          ? 'disabled'
+          : 'active'
+    if (state === 'missing') {
+      return { ok: false, status: 401, body: { error: '账号不存在，请重新登录', code: 'ACCOUNT_MISSING' } }
     }
+    if (state === 'disabled') {
+      return { ok: false, status: 403, body: { error: '账号已被停用', code: 'ACCOUNT_DISABLED' } }
+    }
+    if (state === 'deleted') {
+      return {
+        ok: false,
+        status: 401,
+        body: { error: '账号已注销', code: 'ACCOUNT_DELETED' },
+      }
+    }
+
+    // last_seen 触碰：不阻塞响应（写入失败只影响活跃时间统计）
+    touchSession(db, s!).catch(() => {})
   }
 
   // 老令牌：改密后立即失效（无 sid 无法靠会话表撤销，只能靠时间比对）

@@ -10,6 +10,7 @@ import { genreList, platformList, sortOptions } from '@/data/games'
 import GameCard from '@/components/GameCard.vue'
 import DiscoverCard from '@/components/DiscoverCard.vue'
 import PlatformGameCard from '@/components/PlatformGameCard.vue'
+import GameCardSkeleton from '@/components/GameCardSkeleton.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import MotionGrid from '@/components/MotionGrid.vue'
 import FilterSection from '@/components/FilterSection.vue'
@@ -697,8 +698,9 @@ watch(
 
       <!-- 结果网格 -->
       <main class="flex-1 min-w-0 pb-8">
-        <div v-if="discoverLoading && discoverGames.length === 0" class="flex items-center justify-center py-20 text-[var(--text-dim)]">
-          <Loader2 class="w-5 h-5 animate-spin mr-2" /> 正在加载多平台游戏…
+        <!-- 骨架屏：封面网格逐块点亮，替代白屏转圈 -->
+        <div v-if="discoverLoading && discoverGames.length === 0" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <GameCardSkeleton v-for="i in 10" :key="i" />
         </div>
 
         <EmptyState

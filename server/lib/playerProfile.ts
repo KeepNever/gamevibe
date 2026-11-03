@@ -72,12 +72,24 @@ export interface PlayerProfile {
 export async function collectEvents(userId: string): Promise<InteractionEvent[]> {
   const events: InteractionEvent[] = []
 
+  // 三类事件源互不依赖：并行发查询，远程库下省两次往返
+  const libP = db
+    .prepare(
+      "SELECT external_id, status, added_at FROM user_library WHERE user_id=? AND status IN ('wishlist','playing','completed') AND external_id IS NOT NULL",
+    )
+    .all(userId)
+    .catch(() => [] as any[])
+  const rvP = db
+    .prepare('SELECT game_id, rating, created_at FROM reviews WHERE user_id=?')
+    .all(userId)
+    .catch(() => [] as any[])
+  const rcP = db
+    .prepare('SELECT game_id, viewed_at FROM user_recent WHERE user_id=?')
+    .all(userId)
+    .catch(() => [] as any[])
+
   try {
-    const lib = await db
-      .prepare(
-        "SELECT external_id, status, added_at FROM user_library WHERE user_id=? AND status IN ('wishlist','playing','completed') AND external_id IS NOT NULL",
-      )
-      .all(userId) as any[]
+    const lib = await libP
     for (const r of lib) {
       events.push({
         gameId: r.external_id,
@@ -91,7 +103,7 @@ export async function collectEvents(userId: string): Promise<InteractionEvent[]>
   }
 
   try {
-    const rv = await db.prepare('SELECT game_id, rating, created_at FROM reviews WHERE user_id=?').all(userId) as any[]
+    const rv = await rvP
     for (const r of rv) {
       if (!r.game_id) continue
       events.push({
@@ -106,7 +118,7 @@ export async function collectEvents(userId: string): Promise<InteractionEvent[]>
   }
 
   try {
-    const rc = await db.prepare('SELECT game_id, viewed_at FROM user_recent WHERE user_id=?').all(userId) as any[]
+    const rc = await rcP
     for (const r of rc) {
       if (!r.game_id) continue
       events.push({ gameId: r.game_id, weight: VIEW_WEIGHT, at: Number(r.viewed_at) || 0, via: '浏览过' })
@@ -214,9 +226,14 @@ function topContributors(events: InteractionEvent[], n: number): BasisGame[] {
     }))
 }
 
-export async function buildPlayerProfile(userId: string, now = Date.now()): Promise<PlayerProfile> {
-  const profiles = (await loadGameProfiles())
-  const all = (await collectEvents(userId))
+export async function buildPlayerProfile(
+  userId: string,
+  now = Date.now(),
+  /** 调用方若已加载过画像/事件，传入可省掉重复查询（远程库每查一次是一次往返） */
+  pre?: { profiles?: Map<string, GameProfile>; events?: InteractionEvent[] },
+): Promise<PlayerProfile> {
+  const profiles = pre?.profiles ?? (await loadGameProfiles())
+  const all = pre?.events ?? (await collectEvents(userId))
   const recent = all.filter((e) => e.at > 0 && now - e.at <= RECENT_WINDOW_DAYS * DAY_MS)
 
   const longDims = weightedDims(all, profiles)
@@ -295,13 +312,15 @@ export async function rankForUser(
   userId: string,
   limit = 12,
 ): Promise<{ profile: PlayerProfile; interacted: Set<string>; ranked: RankedGame[] } | null> {
-  const profiles = (await loadGameProfiles())
+  // 远程库下每次查询是一次 73ms 往返：三个互不依赖的加载并行，
+  // 事件只取一次（此前 collectEvents 在本函数与 buildPlayerProfile 里重复查 3 遍）
+  const [profiles, events] = await Promise.all([loadGameProfiles(), collectEvents(userId)])
   if (profiles.size === 0) return null
 
-  const profile = (await buildPlayerProfile(userId))
+  const profile = await buildPlayerProfile(userId, Date.now(), { profiles, events })
   if (profile.coldStart) return null
 
-  const interacted = new Set((await collectEvents(userId)).map((e) => e.gameId))
+  const interacted = new Set(events.map((e) => e.gameId))
   const pref = blendDims(profile)
   const topCore = profile.coreGameplay.map((c) => c.value)
 
@@ -309,7 +328,7 @@ export async function rankForUser(
   const legacyRaw = new Map<string, number>()
   {
     const acc = new Map<string, number>()
-    for (const e of await collectEvents(userId)) {
+    for (const e of events) {
       const g = catalog.find((x) => x.id === e.gameId)
       if (!g) continue
       for (const v of [...g.genres, ...g.tags]) acc.set(v, (acc.get(v) || 0) + e.weight)

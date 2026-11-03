@@ -286,8 +286,27 @@ watch(
       </button>
     </div>
 
-    <div v-if="rawgLoading" class="flex items-center justify-center py-20 text-[var(--text-dim)]">
-      <Loader2 class="w-5 h-5 animate-spin mr-2" /> 加载中…
+    <!-- 骨架屏：横幅 + 封面 + 文案逐块点亮 -->
+    <div v-if="rawgLoading" class="animate-pulse space-y-6 pt-4">
+      <div class="h-10 w-44 rounded-xl bg-[var(--surface-2)]"></div>
+      <div class="relative h-48 md:h-64 rounded-2xl overflow-hidden bg-[var(--surface-2)]"></div>
+      <div class="flex gap-6">
+        <div class="w-36 md:w-48 aspect-[3/4] rounded-xl bg-[var(--surface-2)] shrink-0"></div>
+        <div class="flex-1 space-y-3 pt-2">
+          <div class="h-7 w-2/3 rounded bg-[var(--surface-2)]"></div>
+          <div class="h-4 w-1/3 rounded bg-[var(--surface-2)]"></div>
+          <div class="flex gap-2 pt-2">
+            <div class="h-6 w-16 rounded-full bg-[var(--surface-2)]"></div>
+            <div class="h-6 w-20 rounded-full bg-[var(--surface-2)]"></div>
+            <div class="h-6 w-14 rounded-full bg-[var(--surface-2)]"></div>
+          </div>
+          <div class="space-y-2 pt-3">
+            <div class="h-3.5 w-full rounded bg-[var(--surface-2)]"></div>
+            <div class="h-3.5 w-11/12 rounded bg-[var(--surface-2)]"></div>
+            <div class="h-3.5 w-3/4 rounded bg-[var(--surface-2)]"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-else-if="!rawgGame" class="flex flex-col items-center justify-center py-20">
