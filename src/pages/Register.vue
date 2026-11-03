@@ -61,52 +61,86 @@ const emailError = computed(() => {
 })
 
 // ── Turnstile 人机验证：服务端开了才渲染，token 随注册提交 ──
-const captchaEnabled = ref(false)
+// 状态机：idle（服务端未开启）→ loading（组件加载中）→ ready（可交互）
+//        → failed（网络原因加载失败，可重试）。只有 ready 才真正启用。
+const captchaState = ref<'idle' | 'loading' | 'ready' | 'failed'>('idle')
 const captchaSiteKey = ref('')
 const captchaToken = ref('')
 const captchaWidgetId = ref<string | null>(null)
 const captchaEl = ref<HTMLElement | null>(null)
+const captchaReady = computed(() => captchaState.value === 'ready' && !!captchaToken.value)
 
 declare global {
   interface Window {
     turnstile?: {
       render: (el: HTMLElement, opts: Record<string, unknown>) => string
       reset: (id?: string) => void
+      remove: (id: string) => void
     }
   }
 }
 
-function loadTurnstileScript(): Promise<void> {
+function loadTurnstileScript(timeoutMs = 12000): Promise<void> {
   return new Promise((resolve, reject) => {
     if (window.turnstile) return resolve()
+    // 挂了就换新标签重试，旧标签不再触发回调
+    document.querySelectorAll('script[data-turnstile]').forEach((n) => n.remove())
     const sc = document.createElement('script')
     sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
     sc.async = true
-    sc.onload = () => resolve()
-    sc.onerror = () => reject(new Error('验证组件加载失败'))
+    sc.dataset.turnstile = '1'
+    const timer = setTimeout(() => reject(new Error('验证组件加载超时')), timeoutMs)
+    sc.onload = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    sc.onerror = () => {
+      clearTimeout(timer)
+      reject(new Error('验证组件加载失败'))
+    }
     document.head.appendChild(sc)
   })
 }
 
-onMounted(async () => {
+async function initCaptcha() {
   try {
     const res = await fetch('/api/auth/captcha-config')
     const cfg = await res.json()
     if (!cfg.enabled) return
-    captchaEnabled.value = true
+    captchaState.value = 'loading'
     captchaSiteKey.value = cfg.siteKey
     await loadTurnstileScript()
-    if (captchaEl.value) {
-      captchaWidgetId.value = window.turnstile!.render(captchaEl.value, {
-        sitekey: captchaSiteKey.value,
-        callback: (t: string) => (captchaToken.value = t),
-        'expired-callback': () => (captchaToken.value = ''),
-        theme: 'dark',
-      })
+    if (!captchaEl.value) throw new Error('容器未挂载')
+    // 重渲染前清掉旧实例（重试场景）
+    if (captchaWidgetId.value !== null) {
+      try {
+        window.turnstile!.remove(captchaWidgetId.value)
+      } catch {
+        /* 旧实例可能已失效 */
+      }
+      captchaWidgetId.value = null
     }
+    captchaWidgetId.value = window.turnstile!.render(captchaEl.value, {
+      sitekey: captchaSiteKey.value,
+      callback: (t: string) => (captchaToken.value = t),
+      'expired-callback': () => (captchaToken.value = ''),
+      'error-callback': () => (captchaState.value = 'failed'),
+      theme: 'dark',
+    })
+    captchaState.value = 'ready'
   } catch {
-    captchaEnabled.value = false
+    captchaState.value = 'failed'
   }
+}
+
+function retryCaptcha() {
+  captchaState.value = 'loading'
+  captchaToken.value = ''
+  initCaptcha()
+}
+
+onMounted(() => {
+  initCaptcha()
 })
 
 const canSubmit = computed(
@@ -123,14 +157,24 @@ async function submit() {
   }
   loading.value = true
   try {
-    if (captchaEnabled.value && !captchaToken.value) {
+    if (captchaState.value === 'failed') {
+      error.value = '人机验证组件未能加载（多为网络原因），请点「重试」或刷新页面'
+      loading.value = false
+      return
+    }
+    if (captchaState.value === 'loading') {
+      error.value = '人机验证加载中，请稍候一两秒再提交'
+      loading.value = false
+      return
+    }
+    if (captchaState.value === 'ready' && !captchaToken.value) {
       error.value = '请先完成人机验证'
       loading.value = false
       return
     }
     await auth.register(username.value.trim(), email.value.trim(), password.value, captchaToken.value || undefined)
     captchaToken.value = ''
-    if (captchaEnabled.value && window.turnstile && captchaWidgetId.value !== null) {
+    if (captchaState.value === 'ready' && window.turnstile && captchaWidgetId.value !== null) {
       window.turnstile.reset(captchaWidgetId.value)
     }
     await router.replace(redirectTo.value)
@@ -245,8 +289,24 @@ async function submit() {
           </div>
         </div>
 
-        <!-- Turnstile 人机验证（服务端开启时出现） -->
-        <div ref="captchaEl" class="flex justify-center min-h-[65px]"></div>
+        <!-- Turnstile 人机验证（服务端开启时出现）：容器渲染期间必须可见，失败才隐藏 -->
+        <div v-if="captchaState !== 'idle'" class="min-h-[70px] flex flex-col items-center justify-center gap-1.5">
+          <div v-if="captchaState === 'loading'" class="flex items-center gap-2 text-xs text-[var(--text-faint)]">
+            <Loader2 class="w-3.5 h-3.5 animate-spin" />
+            正在加载人机验证组件…
+          </div>
+          <div v-else-if="captchaState === 'failed'" class="flex flex-col items-center gap-1.5 text-center">
+            <span class="text-xs text-amber-400/90">人机验证组件加载失败（多为网络原因）</span>
+            <button
+              type="button"
+              @click="retryCaptcha"
+              class="px-3 py-1 rounded-lg text-xs bg-[var(--surface-2)] border border-[var(--border)] hover:border-accent/40 transition-colors"
+            >
+              重试
+            </button>
+          </div>
+          <div v-show="captchaState !== 'failed'" ref="captchaEl" class="flex justify-center min-h-[65px]"></div>
+        </div>
 
         <div
           v-if="error"

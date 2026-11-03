@@ -29,12 +29,14 @@ export function securityHeaders() {
 
     // 内容安全策略
     // 放行同源 + Google Fonts + 常用 CDN（前端 index.html 引入了 Inter/Space Grotesk 字体）
+    // Turnstile：script-src 加载组件脚本、frame-src 承载验证 iframe、connect-src 回传挑战数据
     const isDev = process.env.NODE_ENV !== 'production'
+    const turnstileSrc = 'https://challenges.cloudflare.com'
     headers.set(
       'Content-Security-Policy',
       isDev
-        ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://*.openai.com https://*.rawg.io https://api.igdb.com https://store.steampowered.com https://id.twitch.tv"
-        : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://*.openai.com https://*.rawg.io https://api.igdb.com https://store.steampowered.com https://id.twitch.tv; frame-ancestors 'none'"
+        ? `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${turnstileSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' ${turnstileSrc} https://api.openai.com https://*.openai.com https://*.rawg.io https://api.igdb.com https://store.steampowered.com https://id.twitch.tv; frame-src ${turnstileSrc}`
+        : `default-src 'self'; script-src 'self' 'unsafe-inline' ${turnstileSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' ${turnstileSrc} https://api.openai.com https://*.openai.com https://*.rawg.io https://api.igdb.com https://store.steampowered.com https://id.twitch.tv; frame-src ${turnstileSrc}; frame-ancestors 'none'`,
     )
 
     // HSTS（仅 HTTPS）
