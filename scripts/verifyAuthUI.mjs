@@ -10,11 +10,12 @@ for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'https_proxy', 'http_
 }
 
 const base = process.argv[2] || 'http://127.0.0.1:8792'
-const outDir = 'D:/GameVibe/gamevibe/.probe/auth'
+// 相对脚本定位，CI（Linux）与本机（Windows）都能跑
+const outDir = new URL('./../.probe/auth', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 mkdirSync(outDir, { recursive: true })
 
 // 演示密码以种子脚本为准，别硬编码
-const seedSrc = readFileSync('D:/GameVibe/gamevibe/scripts/seedSocial.mjs', 'utf8')
+const seedSrc = readFileSync(new URL('./seedSocial.mjs', import.meta.url), 'utf8')
 const PASS = /const PASS = '([^']+)'/.exec(seedSrc)?.[1] || ''
 if (!PASS) {
   console.error('[fatal] 未能从 seedSocial.mjs 读到演示密码')
