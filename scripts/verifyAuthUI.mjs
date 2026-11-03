@@ -40,10 +40,12 @@ async function loginAs(context, email) {
 // Playwright 自带的 Chromium 未安装（ms-playwright 目录下没有 chromium），
 // 直接复用系统 Chrome，避免为了跑一次验证去下载上百 MB
 const browser = await chromium.launch({
-  // CI 里没有 Chrome 浏览器：设 PLAYWRIGHT_CHANNEL=bundled 时用 Playwright 内置 chromium
-  channel: process.env.PLAYWRIGHT_CHANNEL && process.env.PLAYWRIGHT_CHANNEL !== 'bundled'
-    ? process.env.PLAYWRIGHT_CHANNEL
-    : undefined,
+  // PLAYWRIGHT_CHANNEL=bundled → Playwright 内置 chromium（CI 无 Chrome）；
+  // 未设 → 系统 Chrome（本机现状）；设其他值 → 透传
+  channel:
+    process.env.PLAYWRIGHT_CHANNEL === 'bundled'
+      ? undefined
+      : process.env.PLAYWRIGHT_CHANNEL || 'chrome',
   args: ['--no-proxy-server'],
 })
 const ctx = await browser.newContext({

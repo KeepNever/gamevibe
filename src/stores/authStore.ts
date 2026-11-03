@@ -83,8 +83,8 @@ export const useAuthStore = defineStore('auth', () => {
     setTimeout(() => useGameStore().initFromBackend(), 0)
   }
 
-  async function register(username: string, email: string, password: string) {
-    const res = await api.post('/auth/register', { username, email, password })
+  async function register(username: string, email: string, password: string, turnstileToken?: string) {
+    const res = await api.post('/auth/register', { username, email, password, turnstileToken })
     const d = await res.json()
     applySession(d)
     setTimeout(() => useGameStore().initFromBackend(), 0)

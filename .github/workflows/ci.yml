@@ -14,6 +14,10 @@ jobs:
       PORT: '8792'
       # 回归脚本连跑会撞限流，整体放大配额避免 429 假失败
       RATE_LIMIT_SCALE: '100'
+      # Cloudflare 官方测试密钥：验证码全链路被真实执行（siteverify 真请求），
+      # 但测试 secret 接受任意 token，不构成拦截
+      TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+      TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
       PLAYWRIGHT_CHANNEL: bundled
     steps:
       - uses: actions/checkout@v4

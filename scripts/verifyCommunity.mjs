@@ -52,6 +52,17 @@ const ok = (name, pass, detail = '') => {
   console.log(`${pass ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`)
 }
 
+
+// ── captcha 感知注册：服务端开了 Turnstile 就带测试 token（官方测试 secret 接受任意值）──
+let CAPTCHA_TOKEN = undefined
+try {
+  const cfg = await fetch(BASE + '/api/auth/captcha-config').then((r) => r.json())
+  if (cfg.enabled) CAPTCHA_TOKEN = 'ci-test-token'
+} catch {}
+function regBody(body) {
+  return CAPTCHA_TOKEN ? { ...body, turnstileToken: CAPTCHA_TOKEN } : body
+}
+
 async function main() {
   const stamp = Date.now().toString(36)
   const jarA = makeJar()
@@ -61,11 +72,11 @@ async function main() {
   // 建两个测试用户
   const ra = await call('POST', '/api/auth/register', {
     jar: jarA,
-    body: { username: `社区A${stamp}`, email: `ca${stamp}@test.local`, password: 'communityPass1' },
+    body: regBody({ username: `社区A${stamp}`, email: `ca${stamp}@test.local`, password: 'communityPass1' }),
   })
   const rb = await call('POST', '/api/auth/register', {
     jar: jarB,
-    body: { username: `社区B${stamp}`, email: `cb${stamp}@test.local`, password: 'communityPass1' },
+    body: regBody({ username: `社区B${stamp}`, email: `cb${stamp}@test.local`, password: 'communityPass1' }),
   })
   ok('测试账号创建', ra.status === 201 && rb.status === 201, `A=${ra.status} B=${rb.status}`)
   const authorId = rb.data?.user?.id

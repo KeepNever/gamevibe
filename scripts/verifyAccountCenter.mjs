@@ -84,6 +84,17 @@ async function call(method, path, { jar, body, headers = {} } = {}) {
   return { status: res.status, data, res }
 }
 
+
+// ── captcha 感知注册：服务端开了 Turnstile 就带测试 token（官方测试 secret 接受任意值）──
+let CAPTCHA_TOKEN = undefined
+try {
+  const cfg = await fetch(BASE + '/api/auth/captcha-config').then((r) => r.json())
+  if (cfg.enabled) CAPTCHA_TOKEN = 'ci-test-token'
+} catch {}
+function regBody(body) {
+  return CAPTCHA_TOKEN ? { ...body, turnstileToken: CAPTCHA_TOKEN } : body
+}
+
 async function main() {
   console.log(`\n🔍 账户中心验证 @ ${BASE}\n`)
 
@@ -107,7 +118,7 @@ async function main() {
   const jar = makeJar()
   const reg = await call('POST', '/api/auth/register', {
     jar,
-    body: { username: TEST_USER, email: TEST_EMAIL, password: PASS },
+    body: regBody({ username: TEST_USER, email: TEST_EMAIL, password: PASS }),
   })
   ok('注册成功 201', reg.status === 201, `status=${reg.status} ${JSON.stringify(reg.data).slice(0, 120)}`)
 

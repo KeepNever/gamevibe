@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Gamepad2,
@@ -60,6 +60,55 @@ const emailError = computed(() => {
   return ''
 })
 
+// ── Turnstile 人机验证：服务端开了才渲染，token 随注册提交 ──
+const captchaEnabled = ref(false)
+const captchaSiteKey = ref('')
+const captchaToken = ref('')
+const captchaWidgetId = ref<string | null>(null)
+const captchaEl = ref<HTMLElement | null>(null)
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (el: HTMLElement, opts: Record<string, unknown>) => string
+      reset: (id?: string) => void
+    }
+  }
+}
+
+function loadTurnstileScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.turnstile) return resolve()
+    const sc = document.createElement('script')
+    sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+    sc.async = true
+    sc.onload = () => resolve()
+    sc.onerror = () => reject(new Error('验证组件加载失败'))
+    document.head.appendChild(sc)
+  })
+}
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/auth/captcha-config')
+    const cfg = await res.json()
+    if (!cfg.enabled) return
+    captchaEnabled.value = true
+    captchaSiteKey.value = cfg.siteKey
+    await loadTurnstileScript()
+    if (captchaEl.value) {
+      captchaWidgetId.value = window.turnstile!.render(captchaEl.value, {
+        sitekey: captchaSiteKey.value,
+        callback: (t: string) => (captchaToken.value = t),
+        'expired-callback': () => (captchaToken.value = ''),
+        theme: 'dark',
+      })
+    }
+  } catch {
+    captchaEnabled.value = false
+  }
+})
+
 const canSubmit = computed(
   () => !usernameError.value.replace('请填写', '') && allPwOk.value && !loading.value,
 )
@@ -74,7 +123,16 @@ async function submit() {
   }
   loading.value = true
   try {
-    await auth.register(username.value.trim(), email.value.trim(), password.value)
+    if (captchaEnabled.value && !captchaToken.value) {
+      error.value = '请先完成人机验证'
+      loading.value = false
+      return
+    }
+    await auth.register(username.value.trim(), email.value.trim(), password.value, captchaToken.value || undefined)
+    captchaToken.value = ''
+    if (captchaEnabled.value && window.turnstile && captchaWidgetId.value !== null) {
+      window.turnstile.reset(captchaWidgetId.value)
+    }
     await router.replace(redirectTo.value)
   } catch (err: any) {
     error.value = err?.message || '注册失败，请稍后重试'
@@ -186,6 +244,9 @@ async function submit() {
             </div>
           </div>
         </div>
+
+        <!-- Turnstile 人机验证（服务端开启时出现） -->
+        <div ref="captchaEl" class="flex justify-center min-h-[65px]"></div>
 
         <div
           v-if="error"

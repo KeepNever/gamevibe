@@ -12,6 +12,7 @@ import {
   revokeAllSessions,
 } from '../lib/session.ts'
 import { writeAudit, clientIp } from '../lib/audit.ts'
+import { turnstileConfig, verifyTurnstile } from '../lib/turnstile.ts'
 import {
   checkPasswordStrength,
   checkUsername,
@@ -111,12 +112,27 @@ async function recordAttempt(email: string, ip: string | undefined, success: boo
 }
 
 // ══ 注册（开放注册，即时可用）══════════════════════════
+// ── 人机验证配置（公开）：前端据此决定是否渲染 Turnstile 组件 ──
+auth.get('/captcha-config', (c) => {
+  const cfg = turnstileConfig()
+  return c.json({ enabled: cfg.enabled, siteKey: cfg.siteKey, mode: cfg.mode })
+})
+
 auth.post('/register', async (c) => {
   let body: any
   try {
     body = await safeBody(c)
   } catch {
     return c.json({ error: '请求体格式错误' }, 400)
+  }
+
+  // 防注册刷：开启 Turnstile 时强制校验（fail-closed）
+  const captcha = turnstileConfig()
+  if (captcha.enabled) {
+    const token = String(body?.turnstileToken || '')
+    if (!token) return c.json({ error: '请先完成人机验证' }, 400)
+    const verdict = await verifyTurnstile(token, clientIp(c))
+    if (!verdict.ok) return c.json({ error: verdict.reason }, 403)
   }
 
   const { username, email, password, remember } = body || {}
