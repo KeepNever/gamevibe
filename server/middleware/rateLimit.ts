@@ -37,7 +37,10 @@ export interface RateLimitOptions {
  * 创建速率限制中间件
  */
 export function rateLimit(opts?: RateLimitOptions) {
-  const max = opts?.maxRequests ?? 60
+  // CI / 回归环境整体放大配额（RATE_LIMIT_SCALE=100），
+  // 避免回归脚本连跑撞限流产生 429 假失败。默认 1 = 生产行为不变
+  const scale = Math.max(1, Number(process.env.RATE_LIMIT_SCALE || 1) || 1)
+  const max = Math.ceil((opts?.maxRequests ?? 60) * scale)
   const windowMs = opts?.windowMs ?? 60_000
 
   return async function rateLimitMiddleware(c: any, next: any) {

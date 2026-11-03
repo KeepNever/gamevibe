@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 本地 SQLite 模式（不配 TURSO_* 即离线可跑）
+      PORT: '8792'
+      # 回归脚本连跑会撞限流，整体放大配额避免 429 假失败
+      RATE_LIMIT_SCALE: '100'
+      PLAYWRIGHT_CHANNEL: bundled
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 后端类型检查
+        run: npm run server:typecheck
+
+      - name: 前端类型检查
+        run: npx vue-tsc -b
+
+      - name: 启动后端（本地 SQLite 模式）
+        run: |
+          node --experimental-strip-types --no-warnings server/index.ts &
+          echo $! > server.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8792/api/health > /dev/null; then
+              echo "后端就绪（第 ${i} 秒）"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8792/api/health > /dev/null || (echo "后端 30s 内未就绪" && exit 1)
+
+      - name: 确保种子管理员就位（全新库首个管理员）
+        run: node --experimental-strip-types --no-warnings scripts/ensureAdminSeed.ts
+
+      - name: 回归 · 社区链路（举报 / 版主删除 / 通知）
+        run: node scripts/verifyCommunity.mjs
+
+      - name: 回归 · 账户中心（53 项）
+        run: node scripts/verifyAccountCenter.mjs
+
+      - name: 回归 · 登录 UI（16 项，内置 chromium）
+        run: |
+          npx playwright install chromium --with-deps
+          node scripts/verifyAuthUI.mjs
+
+      - name: 上传失败现场（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence
+          path: |
+            .probe/
+            docs/screens/
+          if-no-files-found: ignore
+          retention-days: 7
