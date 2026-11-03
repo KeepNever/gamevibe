@@ -28,6 +28,9 @@ export type AuditAction =
   | 'account.session.revoke'
   | 'account.logout_all'
   | 'account.delete'
+  | 'review.delete'
+  | 'review.moderate'
+  | 'review.report'
   | 'admin.user.role'
   | 'admin.user.status'
 
@@ -35,7 +38,7 @@ export interface AuditInput {
   actorId?: string | null
   actorName?: string | null
   action: AuditAction
-  targetType?: 'user' | 'session' | 'account'
+  targetType?: 'user' | 'session' | 'account' | 'review'
   targetId?: string | null
   /** 变更明细：{ changes: [{ field, from, to }] } 或一句说明 */
   detail?: Record<string, unknown> | string | null

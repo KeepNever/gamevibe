@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Star, Trash2, Send, Loader2, MessageSquare, ExternalLink, ThumbsUp, ThumbsDown, Clock, TriangleAlert } from 'lucide-vue-next'
+import { Star, Trash2, Send, Loader2, MessageSquare, ExternalLink, ThumbsUp, ThumbsDown, Clock, TriangleAlert, Flag } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/authStore'
 import { useGameStore } from '@/stores/gameStore'
 import { useToastStore } from '@/stores/toastStore'
 import { getSteamReviews } from '@/lib/liveApi'
 import type { SteamReviewsResult } from '@/types/live'
-import { getReviews, postReview, deleteReview, relativeTime, type ReviewItem } from '@/lib/reviewApi'
+import { getReviews, postReview, deleteReview, reportReview, relativeTime, type ReviewItem } from '@/lib/reviewApi'
 
 const props = defineProps<{ gameId: string }>()
 
@@ -75,6 +75,20 @@ async function remove(id: string) {
     toast.addToast(e?.message || '删除失败', 'error')
   } finally {
     deletingId.value = null
+  }
+}
+
+const reportingId = ref<string | null>(null)
+async function report(id: string) {
+  if (!confirm('确定举报这条评论吗？提交后由版主处理。')) return
+  reportingId.value = id
+  try {
+    await reportReview(id, '')
+    toast.addToast('已提交举报，感谢反馈', 'success')
+  } catch (e: any) {
+    toast.addToast(e?.message || '举报失败', 'error')
+  } finally {
+    reportingId.value = null
   }
 }
 
@@ -257,6 +271,12 @@ onMounted(() => { refresh(); loadSteam() })
               class="text-[var(--text-faint)] hover:text-accent-red transition-colors disabled:opacity-50" title="删除我的评论">
               <Loader2 v-if="deletingId === r.id" class="w-3.5 h-3.5 animate-spin" />
               <Trash2 v-else class="w-3.5 h-3.5" />
+            </button>
+            <button v-else-if="auth.user && r.user_id !== auth.user.id" @click="report(r.id)"
+              :disabled="reportingId === r.id"
+              class="text-[var(--text-faint)] hover:text-accent-amber transition-colors disabled:opacity-50" title="举报此评论">
+              <Loader2 v-if="reportingId === r.id" class="w-3.5 h-3.5 animate-spin" />
+              <Flag v-else class="w-3.5 h-3.5" />
             </button>
           </div>
           <p v-if="r.content" class="text-sm text-[var(--text-dim)] leading-relaxed mt-1 break-words">{{ r.content }}</p>

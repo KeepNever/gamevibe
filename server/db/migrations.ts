@@ -103,6 +103,26 @@ export const MIGRATIONS: Migration[] = [
     },
   },
 
+  // ── 5. 评论举报：用户提交，版主处理 ─────────────────────
+  {
+    id: 5,
+    name: 'review_reports',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS review_reports (
+          id          TEXT PRIMARY KEY,
+          review_id   TEXT NOT NULL,
+          reporter_id TEXT NOT NULL,
+          reason      TEXT,
+          handled_at  INTEGER,
+          created_at  INTEGER NOT NULL,
+          UNIQUE(review_id, reporter_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_reports_open ON review_reports(handled_at, created_at DESC);
+      `)
+    },
+  },
+
   // ── 4. 邮箱换绑：双验证的一次性凭据 ─────────────────────
   {
     id: 4,

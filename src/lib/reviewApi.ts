@@ -43,6 +43,11 @@ export async function deleteReview(id: string) {
   return res.json()
 }
 
+export async function reportReview(id: string, reason: string) {
+  const res = await api.post(`/reviews/${id}/report`, { reason })
+  return res.json()
+}
+
 export async function getUserReviews(userId: string): Promise<ReviewItem[]> {
   const res = await api.get(`/reviews/user/${userId}`)
   const d = await res.json()

@@ -293,15 +293,18 @@ social.get('/users/:id', async (c) => {
 social.get('/notifications', authMiddleware, async (c) => {
   const me = c.get('userId')
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') || '30', 10)))
-  const rows = await db.prepare(`
-    SELECT n.id, n.type, n.ref_id, n.read, n.created_at,
-           u.id AS actor_id, u.username, u.display_name, u.avatar
-    FROM notifications n JOIN users u ON u.id = n.actor_id
-    WHERE n.user_id = ?
-    ORDER BY n.created_at DESC LIMIT ?
-  `).all(me, limit) as any[]
-  const unread = (await db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read = 0').get(me) as any).c
-  return c.json({ notifications: rows, unread })
+  // 列表与未读数互不依赖，远程库下并行省一次往返
+  const [rows, unreadRow] = await Promise.all([
+    db.prepare(`
+      SELECT n.id, n.type, n.ref_id, n.read, n.created_at,
+             u.id AS actor_id, u.username, u.display_name, u.avatar
+      FROM notifications n JOIN users u ON u.id = n.actor_id
+      WHERE n.user_id = ?
+      ORDER BY n.created_at DESC LIMIT ?
+    `).all(me, limit) as Promise<any[]>,
+    db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read = 0').get(me) as Promise<any>,
+  ])
+  return c.json({ notifications: rows, unread: Number(unreadRow.c) })
 })
 
 /** 标记单条已读 */

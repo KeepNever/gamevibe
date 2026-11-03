@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import {
   Search,
   Users,
@@ -15,6 +16,7 @@ import {
   Shield,
 } from 'lucide-vue-next'
 import { api, ApiError } from '@/lib/api'
+import { useToastStore } from '@/stores/toastStore'
 import { useAuthStore } from '@/stores/authStore'
 
 interface AdminUser {
@@ -175,6 +177,18 @@ onMounted(() => {
   loadMeta()
 })
 
+const toast = useToastStore()
+
+function relativeShort(ts: number): string {
+  const d = Date.now() - ts
+  const m = 60_000, h = 3_600_000, day = 86_400_000
+  if (d < m) return '刚刚'
+  if (d < h) return `${Math.floor(d / m)} 分钟前`
+  if (d < day) return `${Math.floor(d / h)} 小时前`
+  const dt = new Date(ts)
+  return `${dt.getMonth() + 1}-${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+}
+
 // ══ 审计日志 ══════════════════════════════════════════
 interface AuditRow {
   id: number
@@ -188,7 +202,7 @@ interface AuditRow {
   created_at: number
 }
 
-const tab = ref<'users' | 'audit'>('users')
+const tab = ref<'users' | 'audit' | 'reports'>('users')
 const auditRows = ref<AuditRow[]>([])
 const auditTotal = ref(0)
 const auditPage = ref(1)
@@ -218,9 +232,57 @@ async function loadAudit() {
   }
 }
 
-function switchTab(k: 'users' | 'audit') {
+interface ReportRow {
+  id: string
+  review_id: string
+  reason: string | null
+  created_at: number
+  review_content: string | null
+  game_id: string
+  author_name: string | null
+  reporter_name: string | null
+}
+
+const reports = ref<ReportRow[]>([])
+const reportsLoading = ref(false)
+const reportBusy = ref<string | null>(null)
+
+async function loadReports() {
+  reportsLoading.value = true
+  try {
+    const res = await api.get('/admin/reports')
+    const d = await res.json()
+    reports.value = d.reports ?? []
+  } catch (err: any) {
+    error.value = err instanceof ApiError ? err.message : '举报加载失败'
+  } finally {
+    reportsLoading.value = false
+  }
+}
+
+async function handleReport(r: ReportRow, del: boolean) {
+  reportBusy.value = r.id
+  try {
+    if (del) {
+      await api.del(`/reviews/${r.review_id}`)
+      toast.addToast('评论已删除', 'success')
+    } else {
+      await api.post(`/admin/reports/${r.id}/handle`, {})
+      toast.addToast('已标记处理', 'success')
+    }
+    await loadReports()
+    await loadUsers()
+  } catch (err: any) {
+    toast.addToast(err instanceof ApiError ? err.message : '操作失败', 'error')
+  } finally {
+    reportBusy.value = null
+  }
+}
+
+function switchTab(k: 'users' | 'audit' | 'reports') {
   tab.value = k
   if (k === 'audit') loadAudit()
+  if (k === 'reports') loadReports()
 }
 
 function auditPageGo(p: number) {
@@ -275,7 +337,7 @@ function fmtTime(ts: number): string {
     <!-- 一级切换 -->
     <div class="flex gap-1 mb-5 border-b border-[var(--border)]">
       <button
-        v-for="t in [{ k: 'users', label: '用户管理' }, { k: 'audit', label: '审计日志' }]"
+        v-for="t in [{ k: 'users', label: '用户管理' }, { k: 'audit', label: '审计日志' }, { k: 'reports', label: '举报处理' }]"
         :key="t.k"
         class="px-3.5 py-2.5 -mb-px text-sm border-b-2 transition-colors"
         :class="

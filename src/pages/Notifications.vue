@@ -26,6 +26,8 @@ function timeAgo(ts: number): string {
 function textOf(n: AppNotification): string {
   const name = n.display_name || n.username
   if (n.type === 'follow') return `${name} 关注了你`
+  if (n.type === 'follow_review') return `${name} 发布了新评测，去看看`
+  if (n.type === 'review_moderated') return `${name} 移除了你的一条评论（违反社区规范）`
   return `${name} 与你互动`
 }
 

@@ -169,4 +169,32 @@ admin.get('/overview', requirePermission('admin.access'), async (c) => {
   return c.json({ users, disabled, admins, reviews })
 })
 
+// ══ 举报处理（版主及以上）══════════════════════════════
+admin.get('/reports', requirePermission('review.moderate'), async (c) => {
+  const rows = await db
+    .prepare(
+      `SELECT rr.id, rr.review_id, rr.reason, rr.created_at,
+              r.content AS review_content, r.user_id AS author_id, r.game_id,
+              ru.username AS author_name,
+              pu.username AS reporter_name
+         FROM review_reports rr
+         JOIN reviews r ON r.id = rr.review_id
+         LEFT JOIN users ru ON ru.id = r.user_id
+         LEFT JOIN users pu ON pu.id = rr.reporter_id
+        WHERE rr.handled_at IS NULL
+        ORDER BY rr.created_at DESC
+        LIMIT 50`,
+    )
+    .all() as any[]
+  return c.json({ reports: rows })
+})
+
+admin.post('/reports/:id/handle', requirePermission('review.moderate'), async (c) => {
+  const id = c.req.param('id')
+  const row = await db.prepare('SELECT id FROM review_reports WHERE id=? AND handled_at IS NULL').get(id) as any
+  if (!row) return c.json({ error: '举报不存在或已处理' }, 404)
+  await db.prepare('UPDATE review_reports SET handled_at=? WHERE id=?').run(Date.now(), id)
+  return c.json({ ok: true })
+})
+
 export default admin
