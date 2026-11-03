@@ -32,6 +32,9 @@ jobs:
       - name: 前端类型检查
         run: npx vue-tsc -b
 
+      - name: 构建前端（后端同源托管 dist/，UI 回归依赖它）
+        run: npm run build
+
       - name: 启动后端（本地 SQLite 模式）
         run: |
           node --experimental-strip-types --no-warnings server/index.ts &
