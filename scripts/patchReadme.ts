@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 
 let s = readFileSync('README.md', 'utf8').replace(/\r\n/g, '\n')
-const R = (oldStr, newStr, label) => {
+const R = (oldStr: string, newStr: string, label: string) => {
   if (!s.includes(oldStr)) throw new Error('未匹配: ' + label)
   s = s.replace(oldStr, newStr)
   console.log('✓', label)
