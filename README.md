@@ -167,8 +167,8 @@ Open <http://localhost:5173>. On first boot the backend detects an empty `users`
 **Demo accounts**
 
 ```
-email:    <any seed username>@seed.local     e.g. 糖糖不吃糖@seed.local
-password: seedpass1234
+email:    demo@seed.local        (public demo account, regular-user role)
+password: DemoPass12345
 ```
 
 Environment variables (all optional — the app degrades gracefully without them):
@@ -320,7 +320,7 @@ npm run server                # 后端 :8792（首次启动自动建表 + 播种
 npm run dev                   # 前端 :5173，/api 代理到 8792
 ```
 
-演示账号：`<任意种子用户名>@seed.local`（例：`糖糖不吃糖@seed.local`），密码 `seedpass1234`。
+公开演示账号：`demo@seed.local`，密码 `DemoPass12345`（普通用户角色，可发评论/收藏/体验 AI）。其余种子账号的密码不公开——线上库使用 Turso 持久化后，公开管理员密码等于向全世界开放后台，已轮换为私钥。
 
 > **本机开发提示**：如果所在网络需要代理才能访问外网，Node 直连 Steam 可能被墙，需要在启动后端时临时注入 `HTTPS_PROXY` 与 `NODE_USE_ENV_PROXY`。这两个变量**不要写进 `.env`**（会被带到线上并干扰 LLM 出口）。相关排查经验全部记在 `docs/` 下。
 

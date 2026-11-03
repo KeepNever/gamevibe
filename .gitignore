@@ -59,3 +59,4 @@ pnpm-debug.log*
 
 # 一次性脚本的备份副本
 *.bak
+.seed-private-passwords.txt
