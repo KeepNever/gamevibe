@@ -69,11 +69,11 @@ export interface PlayerProfile {
 
 // ───────────────────────── 采集 ─────────────────────────
 
-export function collectEvents(userId: string): InteractionEvent[] {
+export async function collectEvents(userId: string): Promise<InteractionEvent[]> {
   const events: InteractionEvent[] = []
 
   try {
-    const lib = db
+    const lib = await db
       .prepare(
         "SELECT external_id, status, added_at FROM user_library WHERE user_id=? AND status IN ('wishlist','playing','completed') AND external_id IS NOT NULL",
       )
@@ -91,7 +91,7 @@ export function collectEvents(userId: string): InteractionEvent[] {
   }
 
   try {
-    const rv = db.prepare('SELECT game_id, rating, created_at FROM reviews WHERE user_id=?').all(userId) as any[]
+    const rv = await db.prepare('SELECT game_id, rating, created_at FROM reviews WHERE user_id=?').all(userId) as any[]
     for (const r of rv) {
       if (!r.game_id) continue
       events.push({
@@ -106,7 +106,7 @@ export function collectEvents(userId: string): InteractionEvent[] {
   }
 
   try {
-    const rc = db.prepare('SELECT game_id, viewed_at FROM user_recent WHERE user_id=?').all(userId) as any[]
+    const rc = await db.prepare('SELECT game_id, viewed_at FROM user_recent WHERE user_id=?').all(userId) as any[]
     for (const r of rc) {
       if (!r.game_id) continue
       events.push({ gameId: r.game_id, weight: VIEW_WEIGHT, at: Number(r.viewed_at) || 0, via: '浏览过' })
@@ -119,8 +119,8 @@ export function collectEvents(userId: string): InteractionEvent[] {
 }
 
 /** 已交互游戏集合（用于把已玩过的排除出推荐） */
-export function getInteractedIds(userId: string): Set<string> {
-  return new Set(collectEvents(userId).map((e) => e.gameId))
+export async function getInteractedIds(userId: string): Promise<Set<string>> {
+  return new Set((await collectEvents(userId)).map((e) => e.gameId))
 }
 
 // ───────────────────────── 计算 ─────────────────────────
@@ -214,9 +214,9 @@ function topContributors(events: InteractionEvent[], n: number): BasisGame[] {
     }))
 }
 
-export function buildPlayerProfile(userId: string, now = Date.now()): PlayerProfile {
-  const profiles = loadGameProfiles()
-  const all = collectEvents(userId)
+export async function buildPlayerProfile(userId: string, now = Date.now()): Promise<PlayerProfile> {
+  const profiles = (await loadGameProfiles())
+  const all = (await collectEvents(userId))
   const recent = all.filter((e) => e.at > 0 && now - e.at <= RECENT_WINDOW_DAYS * DAY_MS)
 
   const longDims = weightedDims(all, profiles)
@@ -291,17 +291,17 @@ function blendDims(p: PlayerProfile): DimMap {
  * 为指定用户排序候选游戏。
  * 无激活画像批次 / 无交互 / 全部候选无画像 → 返回 null，调用方回退到旧逻辑。
  */
-export function rankForUser(
+export async function rankForUser(
   userId: string,
   limit = 12,
-): { profile: PlayerProfile; interacted: Set<string>; ranked: RankedGame[] } | null {
-  const profiles = loadGameProfiles()
+): Promise<{ profile: PlayerProfile; interacted: Set<string>; ranked: RankedGame[] } | null> {
+  const profiles = (await loadGameProfiles())
   if (profiles.size === 0) return null
 
-  const profile = buildPlayerProfile(userId)
+  const profile = (await buildPlayerProfile(userId))
   if (profile.coldStart) return null
 
-  const interacted = new Set(collectEvents(userId).map((e) => e.gameId))
+  const interacted = new Set((await collectEvents(userId)).map((e) => e.gameId))
   const pref = blendDims(profile)
   const topCore = profile.coreGameplay.map((c) => c.value)
 
@@ -309,7 +309,7 @@ export function rankForUser(
   const legacyRaw = new Map<string, number>()
   {
     const acc = new Map<string, number>()
-    for (const e of collectEvents(userId)) {
+    for (const e of await collectEvents(userId)) {
       const g = catalog.find((x) => x.id === e.gameId)
       if (!g) continue
       for (const v of [...g.genres, ...g.tags]) acc.set(v, (acc.get(v) || 0) + e.weight)

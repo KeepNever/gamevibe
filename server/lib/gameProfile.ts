@@ -63,9 +63,9 @@ interface ProfileCache {
 let cache: ProfileCache = { batchId: null, map: new Map() }
 
 /** 查询当前激活（且已冻结）的批次 id；异常时返回 null */
-export function getActiveBatchId(): string | null {
+export async function getActiveBatchId(): Promise<string | null> {
   try {
-    const row = db
+    const row = await db
       .prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1")
       .get() as { batch_id?: string } | undefined
     return row?.batch_id ?? null
@@ -75,13 +75,13 @@ export function getActiveBatchId(): string | null {
 }
 
 /** 批次溯源信息（供画像接口展示「数据从哪来」） */
-export function getActiveBatchInfo(): ActiveBatchInfo | null {
+export async function getActiveBatchInfo(): Promise<ActiveBatchInfo | null> {
   try {
-    const row = db
+    const row = await db
       .prepare("SELECT * FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1")
       .get() as any
     if (!row) return null
-    const cnt = db.prepare('SELECT COUNT(*) AS c FROM game_profiles WHERE batch_id=?').get(row.batch_id) as any
+    const cnt = await db.prepare('SELECT COUNT(*) AS c FROM game_profiles WHERE batch_id=?').get(row.batch_id) as any
     return {
       batchId: row.batch_id,
       model: row.model ?? null,
@@ -119,14 +119,14 @@ function toProfile(r: any): GameProfile {
  * 读取激活批次的全部画像。内部按 batch_id 缓存，仅在激活批次变化时重载。
  * 每次调用只做一次极轻的批次查询，运行期不触发任何 LLM。
  */
-export function loadGameProfiles(): Map<string, GameProfile> {
-  const batchId = getActiveBatchId()
+export async function loadGameProfiles(): Promise<Map<string, GameProfile>> {
+  const batchId = await getActiveBatchId()
   if (cache.batchId === batchId) return cache.map
 
   const map = new Map<string, GameProfile>()
   if (batchId) {
     try {
-      const rows = db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(batchId) as any[]
+      const rows = await db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(batchId) as any[]
       for (const r of rows) map.set(r.game_id, toProfile(r))
     } catch {
       // 表缺失或结构异常 → 视作无画像，交由调用方降级
@@ -136,8 +136,8 @@ export function loadGameProfiles(): Map<string, GameProfile> {
   return map
 }
 
-export function getGameProfile(gameId: string): GameProfile | null {
-  return loadGameProfiles().get(gameId) ?? null
+export async function getGameProfile(gameId: string): Promise<GameProfile | null> {
+  return (await loadGameProfiles()).get(gameId) ?? null
 }
 
 /** 该游戏画像的维度分值数组（供相似度计算） */

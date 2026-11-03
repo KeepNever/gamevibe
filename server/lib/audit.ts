@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+import type { GameVibeDb } from '../db/driver.ts'
 import type { Context } from 'hono'
 
 /**
@@ -64,9 +64,9 @@ export function clientUa(c: Context): string | undefined {
 }
 
 /** 写一条审计。任何异常都吞掉——审计失败不该让用户操作失败 */
-export function writeAudit(db: DatabaseSync, c: Context | null, input: AuditInput): void {
+export async function writeAudit(db: GameVibeDb, c: Context | null, input: AuditInput): Promise<void> {
   try {
-    db.prepare(
+    await db.prepare(
       `INSERT INTO audit_logs
          (actor_id, actor_name, action, target_type, target_id, detail, ip, ua, result, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -95,7 +95,7 @@ export interface AuditListQuery {
   q?: string
 }
 
-export function listAudit(db: DatabaseSync, q: AuditListQuery = {}) {
+export async function listAudit(db: GameVibeDb, q: AuditListQuery = {}) {
   const page = Math.max(1, Number(q.page || 1))
   const size = Math.min(100, Math.max(1, Number(q.pageSize || 20)))
   const offset = (page - 1) * size
@@ -118,10 +118,10 @@ export function listAudit(db: DatabaseSync, q: AuditListQuery = {}) {
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
   const total = (
-    db.prepare(`SELECT COUNT(*) AS c FROM audit_logs ${clause}`).get(...args) as unknown as { c: number }
+    await db.prepare(`SELECT COUNT(*) AS c FROM audit_logs ${clause}`).get(...args) as unknown as { c: number }
   ).c
 
-  const rows = db
+  const rows = await db
     .prepare(`SELECT * FROM audit_logs ${clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
     .all(...args, size, offset) as unknown as any[]
 

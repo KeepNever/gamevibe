@@ -8,10 +8,10 @@ const stats = new Hono<{ Variables: { userId: string; username: string } }>()
 stats.use('*', authMiddleware)
 
 // 个人游戏数据看板聚合：用户库 / 最近浏览 / 我的评论，一次返回
-stats.get('/', (c) => {
+stats.get('/', async (c) => {
   const userId = c.get('userId')
 
-  const libRows = db
+  const libRows = await db
     .prepare('SELECT id, user_id, external_id, name, cover_url, status, added_at, user_rating FROM user_library WHERE user_id=?')
     .all(userId) as any[]
 
@@ -19,11 +19,11 @@ stats.get('/', (c) => {
   const playing = libRows.filter((r) => r.status === 'playing').length
   const completed = libRows.filter((r) => r.status === 'completed').length
 
-  const recentRows = db
+  const recentRows = await db
     .prepare('SELECT game_id, viewed_at FROM user_recent WHERE user_id=? ORDER BY viewed_at DESC')
     .all(userId) as any[]
 
-  const reviewRows = db
+  const reviewRows = await db
     .prepare('SELECT id, game_id, rating, content, created_at FROM reviews WHERE user_id=? ORDER BY created_at DESC')
     .all(userId) as any[]
 

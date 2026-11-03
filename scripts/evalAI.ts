@@ -49,9 +49,9 @@ interface GameProfileRow {
 function loadProfiles(): Map<string, GameProfileRow> {
   const map = new Map<string, GameProfileRow>()
   try {
-    const b = db.prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1").get() as any
+    const b = await db.prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1").get() as any
     if (!b) return map
-    for (const r of db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(b.batch_id) as any[]) map.set(r.game_id, r)
+    for (const r of await db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(b.batch_id) as any[]) map.set(r.game_id, r)
   } catch {
     /* 无画像 → 相关硬条件跳过 */
   }
@@ -204,8 +204,8 @@ async function main() {
     await new Promise((res) => setTimeout(res, GAP_MS))
   }
 
-  db.prepare('DELETE FROM chat_messages WHERE user_id=?').run(reg.user.id)
-  db.prepare('DELETE FROM users WHERE id=?').run(reg.user.id)
+  await db.prepare('DELETE FROM chat_messages WHERE user_id=?').run(reg.user.id)
+  await db.prepare('DELETE FROM users WHERE id=?').run(reg.user.id)
 
   const n = cases.length
   const hardRate = hardTotal ? Math.round((hardPass / hardTotal) * 1000) / 10 : null

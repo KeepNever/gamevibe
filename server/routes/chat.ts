@@ -24,7 +24,7 @@ chat.post('/chat', authMiddleware, async (c) => {
   const webMode: 'auto' | 'on' | 'off' = body?.web === 'on' || body?.web === 'off' ? body.web : 'auto'
 
   // 存用户消息
-  db.prepare('INSERT INTO chat_messages (id,user_id,role,content,game_ids,created_at) VALUES (?,?,?,?,?,?)').run(
+  await db.prepare('INSERT INTO chat_messages (id,user_id,role,content,game_ids,created_at) VALUES (?,?,?,?,?,?)').run(
     randomBytes(12).toString('hex'),
     userId,
     'user',
@@ -36,7 +36,7 @@ chat.post('/chat', authMiddleware, async (c) => {
   const result = await getAIRecommendation(message, { web: webMode })
 
   // 存 AI 回复
-  db.prepare('INSERT INTO chat_messages (id,user_id,role,content,game_ids,created_at) VALUES (?,?,?,?,?,?)').run(
+  await db.prepare('INSERT INTO chat_messages (id,user_id,role,content,game_ids,created_at) VALUES (?,?,?,?,?,?)').run(
     randomBytes(12).toString('hex'),
     userId,
     'assistant',
@@ -67,9 +67,9 @@ chat.post('/chat', authMiddleware, async (c) => {
   })
 })
 
-chat.get('/history', authMiddleware, (c) => {
+chat.get('/history', authMiddleware, async (c) => {
   const userId = c.get('userId')
-  const rows = db.prepare('SELECT * FROM chat_messages WHERE user_id=? ORDER BY created_at ASC').all(userId)
+  const rows = await db.prepare('SELECT * FROM chat_messages WHERE user_id=? ORDER BY created_at ASC').all(userId)
   return c.json({
     messages: rows.map((r: any) => ({
       id: r.id,

@@ -419,9 +419,9 @@ export interface FilterResult {
 }
 
 /** 在 catalog × 冻结画像上执行硬约束过滤，空结果时逐级放宽 */
-export function filterCatalog(reqs: Requirement[], limit = 6): FilterResult {
+export async function filterCatalog(reqs: Requirement[], limit = 6): Promise<FilterResult> {
   if (!reqs.length) return { ids: [], relaxed: [] }
-  const profiles = loadGameProfiles()
+  const profiles = await loadGameProfiles()
   const relaxed: Requirement[] = []
   let active = [...reqs]
 

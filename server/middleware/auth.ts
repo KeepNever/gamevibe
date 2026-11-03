@@ -39,7 +39,7 @@ export type ResolveResult =
   | { ok: true; identity: Identity }
   | { ok: false; status: 401 | 403; body: Record<string, unknown> }
 
-export function resolveIdentity(c: any): ResolveResult {
+export async function resolveIdentity(c: any): Promise<ResolveResult> {
   const raw = readRawToken(c)
   if (!raw) return { ok: false, status: 401, body: { error: '未授权：缺少令牌' } }
 
@@ -53,7 +53,7 @@ export function resolveIdentity(c: any): ResolveResult {
   let legacy = true
 
   if (payload.sid) {
-    const s = getSession(db, payload.sid)
+    const s = (await getSession(db, payload.sid))
     if (!isSessionAlive(s)) {
       return {
         ok: false,
@@ -69,7 +69,7 @@ export function resolveIdentity(c: any): ResolveResult {
   }
 
   // 账号状态：不存在 / 已注销 / 已停用
-  const state = getAccountState(userId)
+  const state = (await getAccountState(userId))
   if (state === 'missing') {
     return { ok: false, status: 401, body: { error: '账号不存在，请重新登录', code: 'ACCOUNT_MISSING' } }
   }
@@ -86,7 +86,7 @@ export function resolveIdentity(c: any): ResolveResult {
 
   // 老令牌：改密后立即失效（无 sid 无法靠会话表撤销，只能靠时间比对）
   if (legacy) {
-    const row = db.prepare('SELECT username, password_changed_at FROM users WHERE id=?').get(userId) as
+    const row = await db.prepare('SELECT username, password_changed_at FROM users WHERE id=?').get(userId) as
       | { username: string; password_changed_at: number }
       | undefined
     if (row) {
@@ -109,7 +109,7 @@ export function resolveIdentity(c: any): ResolveResult {
 export const authMiddleware = createMiddleware<{
   Variables: { userId: string; username: string; sessionId: string | undefined; legacyToken: boolean }
 }>(async (c, next) => {
-  const r = resolveIdentity(c)
+  const r = (await resolveIdentity(c))
   if (!r.ok) return c.json(r.body, r.status)
   c.set('userId', r.identity.userId)
   c.set('username', r.identity.username)
@@ -126,7 +126,7 @@ export const authMiddleware = createMiddleware<{
 export const optionalAuth = createMiddleware<{
   Variables: { userId: string | undefined; username: string | undefined; sessionId: string | undefined }
 }>(async (c, next) => {
-  const r = resolveIdentity(c)
+  const r = (await resolveIdentity(c))
   if (r.ok) {
     c.set('userId', r.identity.userId)
     c.set('username', r.identity.username)

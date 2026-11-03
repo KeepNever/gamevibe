@@ -55,8 +55,8 @@ function emailCodeHash(userId: string, code: string): string {
   return sha256(`${userId}:${code}`)
 }
 
-function meRow(userId: string): any {
-  return db
+async function meRow(userId: string): Promise<any> {
+  return await db
     .prepare(
       `SELECT id, username, email, display_name, avatar, bio, phone, phone_verified,
               status, created_at, updated_at, username_changed_at, password_changed_at
@@ -65,7 +65,7 @@ function meRow(userId: string): any {
     .get(userId) as any
 }
 
-function accountView(row: any, sessionId?: string) {
+async function accountView(row: any, sessionId?: string) {
   const changedAt = Number(row.username_changed_at || 0)
   const canRenameAt = changedAt ? changedAt + USERNAME_COOLDOWN_MS : 0
   return {
@@ -82,8 +82,8 @@ function accountView(row: any, sessionId?: string) {
       updated_at: row.updated_at ?? null,
     },
     meta: {
-      roles: getUserRoles(String(row.id)),
-      permissions: getUserPermissions(String(row.id)),
+      roles: await getUserRoles(String(row.id)),
+      permissions: await getUserPermissions(String(row.id)),
       usernameChangedAt: changedAt || null,
       canRenameAt: canRenameAt || null,
       /** 用户名冷却是否已过 */
@@ -96,16 +96,16 @@ function accountView(row: any, sessionId?: string) {
 }
 
 // ══ 账户总览 ══════════════════════════════════════════
-account.get('/', (c) => {
-  const row = meRow(c.get('userId'))
+account.get('/', async (c) => {
+  const row = await meRow(c.get('userId'))
   if (!row) return c.json({ error: '用户不存在' }, 404)
-  return c.json(accountView(row, c.get('sessionId')))
+  return c.json(await accountView(row, c.get('sessionId')))
 })
 
 // ══ 修改个人资料（昵称 / 头像 / 简介）══════════════════
 account.patch('/profile', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   let body: any
@@ -155,12 +155,12 @@ account.patch('/profile', async (c) => {
     }
   }
 
-  if (!changes.length) return c.json({ ok: true, changed: 0, ...accountView(row, c.get('sessionId')) })
+  if (!changes.length) return c.json({ ok: true, changed: 0, ...(await accountView(row, c.get('sessionId'))) })
 
   sets.push('updated_at = ?')
   args.push(Date.now())
   args.push(userId)
-  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...(args as any[]))
+  await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...(args as any[]))
 
   writeAudit(db, c, {
     actorId: userId,
@@ -171,13 +171,13 @@ account.patch('/profile', async (c) => {
     detail: { changes },
   })
 
-  return c.json({ ok: true, changed: changes.length, ...accountView(meRow(userId), c.get('sessionId')) })
+  return c.json({ ok: true, changed: changes.length, ...(await accountView(await meRow(userId), c.get('sessionId'))) })
 })
 
 // ══ 修改用户名（30 天冷却）══════════════════════════════
 account.patch('/username', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
@@ -193,11 +193,11 @@ account.patch('/username', async (c) => {
     return c.json({ error: `用户名修改有 30 天冷却，还需等待 ${days} 天`, code: 'USERNAME_COOLDOWN' }, 429)
   }
 
-  const taken = db.prepare('SELECT id FROM users WHERE username = ? AND id <> ?').get(next, userId)
+  const taken = await db.prepare('SELECT id FROM users WHERE username = ? AND id <> ?').get(next, userId)
   if (taken) return c.json({ error: '该用户名已被占用' }, 409)
 
   const now = Date.now()
-  db.prepare('UPDATE users SET username = ?, username_changed_at = ?, updated_at = ? WHERE id = ?').run(
+  await db.prepare('UPDATE users SET username = ?, username_changed_at = ?, updated_at = ? WHERE id = ?').run(
     next,
     now,
     now,
@@ -213,13 +213,13 @@ account.patch('/username', async (c) => {
     detail: { changes: [{ field: '用户名', from: row.username, to: next }] },
   })
 
-  return c.json({ ok: true, ...accountView(meRow(userId), c.get('sessionId')) })
+  return c.json({ ok: true, ...(await accountView(await meRow(userId), c.get('sessionId'))) })
 })
 
 // ══ 修改密码（验旧密码 + 踢掉其它设备）══════════════════
 account.post('/password', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
@@ -227,7 +227,7 @@ account.post('/password', async (c) => {
   const password = String(body?.password ?? '')
   if (!current) return c.json({ error: '请填写当前密码' }, 400)
 
-  const full = db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(userId) as any
+  const full = await db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(userId) as any
   if (!full || !verifyPassword(current, String(full.password_hash), String(full.salt))) {
     writeAudit(db, c, {
       actorId: userId,
@@ -247,13 +247,13 @@ account.post('/password', async (c) => {
 
   const { hash, salt } = hashPassword(password)
   const now = Date.now()
-  db.prepare(
+  await db.prepare(
     'UPDATE users SET password_hash = ?, salt = ?, password_changed_at = ?, updated_at = ? WHERE id = ?',
   ).run(hash, salt, now, now, userId)
 
   // 保留当前设备，其它端一律失效；无 sid 的老令牌靠 password_changed_at 兜底失效
   const keepSid = c.get('sessionId')
-  const revoked = revokeAllSessions(db, userId, keepSid)
+  const revoked = await revokeAllSessions(db, userId, keepSid)
 
   writeAudit(db, c, {
     actorId: userId,
@@ -276,7 +276,7 @@ account.post('/password', async (c) => {
 // ══ 换绑邮箱：第一步，向新邮箱发验证码 ═══════════════════
 account.post('/email/request', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
@@ -284,11 +284,11 @@ account.post('/email/request', async (c) => {
   if (!EMAIL_RE.test(next)) return c.json({ error: '邮箱格式不正确' }, 400)
   if (next === String(row.email).toLowerCase()) return c.json({ error: '新邮箱与当前邮箱相同' }, 400)
 
-  const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id <> ?').get(next, userId)
+  const taken = await db.prepare('SELECT id FROM users WHERE email = ? AND id <> ?').get(next, userId)
   if (taken) return c.json({ error: '该邮箱已被其它账号使用' }, 409)
 
   // 节流：60 秒内只能发一次，防止被当成短信轰炸机
-  const last = db
+  const last = await db
     .prepare('SELECT created_at FROM email_changes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
     .get(userId) as any
   if (last && Date.now() - Number(last.created_at) < EMAIL_CODE_RESEND_MS) {
@@ -298,7 +298,7 @@ account.post('/email/request', async (c) => {
 
   const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, '0')
   const now = Date.now()
-  db.prepare(
+  await db.prepare(
     `INSERT INTO email_changes (id, user_id, new_email, code_hash, attempts, expires_at, used_at, created_at)
      VALUES (?,?,?,?,0,?,NULL,?)`,
   ).run(randomBytes(8).toString('hex'), userId, next, emailCodeHash(userId, code), now + EMAIL_CODE_TTL_MS, now)
@@ -338,7 +338,7 @@ account.post('/email/request', async (c) => {
 // ══ 换绑邮箱：第二步，校验验证码并落库 ═══════════════════
 account.post('/email/confirm', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
@@ -346,7 +346,7 @@ account.post('/email/confirm', async (c) => {
   const code = String(body?.code ?? '').trim()
   if (!next || !code) return c.json({ error: '请填写邮箱与验证码' }, 400)
 
-  const rec = db
+  const rec = await db
     .prepare(
       `SELECT * FROM email_changes
         WHERE user_id = ? AND new_email = ? AND used_at IS NULL
@@ -356,12 +356,12 @@ account.post('/email/confirm', async (c) => {
   if (!rec) return c.json({ error: '没有待验证的换绑申请，请先获取验证码' }, 400)
   if (Number(rec.expires_at) < Date.now()) return c.json({ error: '验证码已过期，请重新获取' }, 400)
   if (Number(rec.attempts) >= EMAIL_CODE_MAX_ATTEMPTS) {
-    db.prepare('UPDATE email_changes SET used_at = ? WHERE id = ?').run(Date.now(), rec.id)
+    await db.prepare('UPDATE email_changes SET used_at = ? WHERE id = ?').run(Date.now(), rec.id)
     return c.json({ error: '验证码错误次数过多，请重新获取' }, 429)
   }
 
   if (emailCodeHash(userId, code) !== String(rec.code_hash)) {
-    db.prepare('UPDATE email_changes SET attempts = attempts + 1 WHERE id = ?').run(rec.id)
+    await db.prepare('UPDATE email_changes SET attempts = attempts + 1 WHERE id = ?').run(rec.id)
     writeAudit(db, c, {
       actorId: userId,
       actorName: row.username,
@@ -376,16 +376,16 @@ account.post('/email/confirm', async (c) => {
   }
 
   // 并发兜底：校验期间可能被别人抢注
-  const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id <> ?').get(next, userId)
+  const taken = await db.prepare('SELECT id FROM users WHERE email = ? AND id <> ?').get(next, userId)
   if (taken) return c.json({ error: '该邮箱已被其它账号使用' }, 409)
 
   const oldEmail = String(row.email)
   const now = Date.now()
-  db.prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?').run(next, now, userId)
-  db.prepare('UPDATE email_changes SET used_at = ? WHERE id = ?').run(now, rec.id)
+  await db.prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?').run(next, now, userId)
+  await db.prepare('UPDATE email_changes SET used_at = ? WHERE id = ?').run(now, rec.id)
 
   // 换绑后踢掉其它设备：邮箱是找回密码的凭据，换了邮箱等于换了钥匙
-  const revoked = revokeAllSessions(db, userId, c.get('sessionId'))
+  const revoked = await revokeAllSessions(db, userId, c.get('sessionId'))
 
   writeAudit(db, c, {
     actorId: userId,
@@ -408,14 +408,14 @@ account.post('/email/confirm', async (c) => {
     ok: true,
     revokedSessions: revoked,
     oldEmailNotified: notice.delivered,
-    ...accountView(meRow(userId), c.get('sessionId')),
+    ...(await accountView(await meRow(userId), c.get('sessionId'))),
   })
 })
 
 // ══ 手机号（本期只记录，短信通道未接入不做假验证）═══════
 account.patch('/phone', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
@@ -423,7 +423,7 @@ account.patch('/phone', async (c) => {
   const phone = raw.replace(/\s|-/g, '')
 
   if (!phone) {
-    db.prepare('UPDATE users SET phone = NULL, phone_verified = 0, phone_verified_at = NULL, updated_at = ? WHERE id = ?').run(
+    await db.prepare('UPDATE users SET phone = NULL, phone_verified = 0, phone_verified_at = NULL, updated_at = ? WHERE id = ?').run(
       Date.now(),
       userId,
     )
@@ -435,15 +435,15 @@ account.patch('/phone', async (c) => {
       targetId: userId,
       detail: { changes: [{ field: '手机号', from: row.phone, to: null }] },
     })
-    return c.json({ ok: true, ...accountView(meRow(userId), c.get('sessionId')) })
+    return c.json({ ok: true, ...(await accountView(await meRow(userId), c.get('sessionId'))) })
   }
 
   if (!PHONE_RE.test(phone)) return c.json({ error: '请输入有效的中国大陆手机号' }, 400)
 
-  const taken = db.prepare('SELECT id FROM users WHERE phone = ? AND id <> ?').get(phone, userId)
+  const taken = await db.prepare('SELECT id FROM users WHERE phone = ? AND id <> ?').get(phone, userId)
   if (taken) return c.json({ error: '该手机号已被其它账号绑定' }, 409)
 
-  db.prepare('UPDATE users SET phone = ?, phone_verified = 0, phone_verified_at = NULL, updated_at = ? WHERE id = ?').run(
+  await db.prepare('UPDATE users SET phone = ?, phone_verified = 0, phone_verified_at = NULL, updated_at = ? WHERE id = ?').run(
     phone,
     Date.now(),
     userId,
@@ -461,21 +461,21 @@ account.patch('/phone', async (c) => {
   return c.json({
     ok: true,
     note: '手机号已记录，但尚未验证——短信通道还未接入，本站不会把它当作已验证凭据',
-    ...accountView(meRow(userId), c.get('sessionId')),
+    ...(await accountView(await meRow(userId), c.get('sessionId'))),
   })
 })
 
 // ══ 登录设备 ══════════════════════════════════════════
-account.get('/sessions', (c) => {
+account.get('/sessions', async (c) => {
   const userId = c.get('userId')
   pruneSessions(db)
-  return c.json({ sessions: listSessions(db, userId, c.get('sessionId')) })
+  return c.json({ sessions: await listSessions(db, userId, c.get('sessionId')) })
 })
 
-account.delete('/sessions/:id', (c) => {
+account.delete('/sessions/:id', async (c) => {
   const userId = c.get('userId')
   const sid = c.req.param('id')
-  const s = getSession(db, sid)
+  const s = (await getSession(db, sid))
   if (!s || String(s.user_id) !== userId) return c.json({ error: '会话不存在' }, 404)
   if (sid === c.get('sessionId')) {
     return c.json({ error: '不能在这里踢掉当前设备，请用「退出登录」' }, 400)
@@ -493,9 +493,9 @@ account.delete('/sessions/:id', (c) => {
   return c.json({ ok: true })
 })
 
-account.post('/logout-all', (c) => {
+account.post('/logout-all', async (c) => {
   const userId = c.get('userId')
-  const n = revokeAllSessions(db, userId)
+  const n = await revokeAllSessions(db, userId)
   clearSessionCookie(c)
   writeAudit(db, c, {
     actorId: userId,
@@ -509,22 +509,22 @@ account.post('/logout-all', (c) => {
 })
 
 // ══ 我的操作日志 ══════════════════════════════════════
-account.get('/audit', (c) => {
+account.get('/audit', async (c) => {
   const userId = c.get('userId')
   const page = Number(c.req.query('page') || 1)
   const pageSize = Number(c.req.query('pageSize') || 20)
-  return c.json(listAudit(db, { actorId: userId, page, pageSize }))
+  return c.json(await listAudit(db, { actorId: userId, page, pageSize }))
 })
 
 // ══ 数据导出（可携带权的最小实现）══════════════════════
-account.get('/export', (c) => {
+account.get('/export', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
-  const library = db.prepare('SELECT * FROM user_library WHERE user_id = ? ORDER BY added_at DESC').all(userId)
-  const reviews = db.prepare('SELECT id, game_id, rating, content, created_at FROM reviews WHERE user_id = ?').all(userId)
-  const sessions = listSessions(db, userId, c.get('sessionId')).map((s) => ({
+  const library = await db.prepare('SELECT * FROM user_library WHERE user_id = ? ORDER BY added_at DESC').all(userId)
+  const reviews = await db.prepare('SELECT id, game_id, rating, content, created_at FROM reviews WHERE user_id = ?').all(userId)
+  const sessions = (await listSessions(db, userId, c.get('sessionId'))).map((s) => ({
     device: s.device,
     os: s.os,
     ip: s.ip,
@@ -543,7 +543,7 @@ account.get('/export', (c) => {
       phone_verified: Number(row.phone_verified || 0),
       created_at: row.created_at,
     },
-    roles: getUserRoles(userId).map((r) => r.key),
+    roles: (await getUserRoles(userId)).map((r) => r.key),
     library,
     reviews,
     sessions,
@@ -553,22 +553,22 @@ account.get('/export', (c) => {
 // ══ 注销账号（软删除 + 立即匿名化）══════════════════════
 account.delete('/', async (c) => {
   const userId = c.get('userId')
-  const row = meRow(userId)
+  const row = (await meRow(userId))
   if (!row) return c.json({ error: '用户不存在' }, 404)
 
   const body = await safeBody(c)
   const password = String(body?.password ?? '')
   if (!password) return c.json({ error: '请输入密码以确认注销' }, 400)
 
-  const full = db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(userId) as any
+  const full = await db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(userId) as any
   if (!full || !verifyPassword(password, String(full.password_hash), String(full.salt))) {
     return c.json({ error: '密码不正确' }, 400)
   }
 
   // 最后一个管理员不能注销，否则后台直接锁死没人管
-  if (getMaxLevel(userId) >= 100) {
+  if ((await getMaxLevel(userId)) >= 100) {
     const admins = (
-      db
+      await db
         .prepare(
           `SELECT COUNT(DISTINCT ur.user_id) AS c
              FROM user_roles ur JOIN roles r ON r.id = ur.role_id
@@ -586,7 +586,7 @@ account.delete('/', async (c) => {
   const now = Date.now()
   // 立即匿名化：用户的评论/收藏仍挂在原 id 上（社交数据不会突然消失），
   // 但姓名、邮箱、头像、手机号全部抹掉，符合「注销即不可识别」的预期。
-  db.prepare(
+  await db.prepare(
     `UPDATE users SET
         username = ?, email = ?, display_name = '已注销用户',
         avatar = NULL, bio = NULL, phone = NULL, phone_verified = 0, phone_verified_at = NULL,
@@ -594,7 +594,7 @@ account.delete('/', async (c) => {
       WHERE id = ?`,
   ).run(`deleted_${userId}`, `deleted_${userId}@removed.local`, now, now, userId)
 
-  revokeAllSessions(db, userId)
+  await revokeAllSessions(db, userId)
   clearSessionCookie(c)
 
   writeAudit(db, c, {

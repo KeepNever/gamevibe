@@ -32,11 +32,11 @@ interface EvalCase {
 function loadProfiles(): Map<string, any> {
   const map = new Map<string, any>()
   try {
-    const b = db
+    const b = await db
       .prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1")
       .get() as any
     if (!b) return map
-    for (const r of db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(b.batch_id) as any[]) map.set(r.game_id, r)
+    for (const r of await db.prepare('SELECT * FROM game_profiles WHERE batch_id=?').all(b.batch_id) as any[]) map.set(r.game_id, r)
   } catch {
     /* 无画像 */
   }

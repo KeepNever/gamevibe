@@ -24,9 +24,9 @@ function level(v: number): 'high' | 'mid' | 'low' {
   return 'mid'
 }
 
-function profileSource() {
-  const batch = getActiveBatchInfo()
-  const covered = loadGameProfiles().size
+async function profileSource() {
+  const batch = (await getActiveBatchInfo())
+  const covered = (await loadGameProfiles()).size
   return {
     batchId: batch?.batchId ?? null,
     model: batch?.model ?? null,
@@ -39,9 +39,9 @@ function profileSource() {
 }
 
 // ───────── 玩家画像：长期 + 近期 + 依据（必须登录）─────────
-aiPersonal.get('/profile', authMiddleware, (c) => {
+aiPersonal.get('/profile', authMiddleware, async (c) => {
   const userId = c.get('userId')
-  const profile = buildPlayerProfile(userId)
+  const profile = (await buildPlayerProfile(userId))
   return c.json({
     ok: true,
     coldStart: profile.coldStart,
@@ -71,7 +71,7 @@ aiPersonal.get('/profile', authMiddleware, (c) => {
 aiPersonal.get('/recommend', authMiddleware, async (c) => {
   const userId = c.get('userId')
   const limit = Math.min(8, Math.max(1, Number(c.req.query('limit')) || 4))
-  const ranked = rankForUser(userId, limit)
+  const ranked = (await rankForUser(userId, limit))
 
   // 冷启动 / 无激活画像批次 → 降级为「高评分热门 + 诚实说明」，不谎称个性化
   if (!ranked || !ranked.ranked.length) {
@@ -96,14 +96,14 @@ aiPersonal.get('/recommend', authMiddleware, async (c) => {
 
   const { profile, ranked: top } = ranked
   const candidateIds = top.map((t) => t.game.id)
-  const fingerprint = `${profileSource().batchId}|${profile.sampleSize}|${candidateIds.join(',')}`
+  const fingerprint = `${(await profileSource()).batchId}|${profile.sampleSize}|${candidateIds.join(',')}`
 
   const cached = narrativeCache.get(userId)
   if (cached && cached.fingerprint === fingerprint && cached.until > Date.now()) {
     return c.json(cached.data)
   }
 
-  const profileGames = loadGameProfiles()
+  const profileGames = await loadGameProfiles()
   const facts = [
     '【玩家画像】',
     ...profileSummaryLines(profile),

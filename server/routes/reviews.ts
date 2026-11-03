@@ -7,8 +7,8 @@ import { getSteamReviewsByGameId } from '../lib/steamReviews.ts'
 const reviews = new Hono()
 
 // 读取单条评论并附带用户信息
-function selectReviewRow(id: string) {
-  return db
+async function selectReviewRow(id: string) {
+  return await db
     .prepare(
       `SELECT r.id, r.user_id, r.game_id, r.rating, r.content, r.created_at,
               u.username, u.display_name, u.avatar
@@ -18,8 +18,8 @@ function selectReviewRow(id: string) {
     .get(id) as any
 }
 
-function selectGameReviews(gameId: string, limit: number, offset: number) {
-  return db
+async function selectGameReviews(gameId: string, limit: number, offset: number) {
+  return await db
     .prepare(
       `SELECT r.id, r.user_id, r.game_id, r.rating, r.content, r.created_at,
               u.username, u.display_name, u.avatar
@@ -31,8 +31,8 @@ function selectGameReviews(gameId: string, limit: number, offset: number) {
     .all(gameId, limit, offset) as any[]
 }
 
-function aggregateFor(gameId: string) {
-  const row = db
+async function aggregateFor(gameId: string) {
+  const row = await db
     .prepare('SELECT COUNT(*) AS cnt, AVG(rating) AS avg FROM reviews WHERE game_id = ?')
     .get(gameId) as any
   return {
@@ -42,8 +42,8 @@ function aggregateFor(gameId: string) {
 }
 
 // ── 公开：全站评论聚合（供卡片真实平均分） ──────────────
-reviews.get('/aggregate', (c) => {
-  const rows = db
+reviews.get('/aggregate', async (c) => {
+  const rows = await db
     .prepare('SELECT game_id, COUNT(*) AS cnt, AVG(rating) AS avg FROM reviews GROUP BY game_id')
     .all() as any[]
   const map: Record<string, { avg: number; count: number }> = {}
@@ -54,9 +54,9 @@ reviews.get('/aggregate', (c) => {
 })
 
 // ── 公开：按用户查询其全部评论（看板/社交用） ───────────
-reviews.get('/user/:userId', authMiddleware, (c) => {
+reviews.get('/user/:userId', authMiddleware, async (c) => {
   const userId = c.req.param('userId')
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT r.id, r.user_id, r.game_id, r.rating, r.content, r.created_at,
               u.username, u.display_name, u.avatar
@@ -69,12 +69,12 @@ reviews.get('/user/:userId', authMiddleware, (c) => {
 })
 
 // ── 公开：单个游戏的评论列表 + 平均分（分页） ──────────
-reviews.get('/:gameId', (c) => {
+reviews.get('/:gameId', async (c) => {
   const gameId = c.req.param('gameId')
   const page = Math.max(1, parseInt(c.req.query('page') || '1', 10) || 1)
   const pageSize = Math.min(50, Math.max(1, parseInt(c.req.query('pageSize') || '20', 10) || 20))
   const rows = selectGameReviews(gameId, pageSize, (page - 1) * pageSize)
-  const agg = aggregateFor(gameId)
+  const agg = (await aggregateFor(gameId))
   return c.json({ reviews: rows, average: agg.average, count: agg.count })
 })
 
@@ -95,12 +95,12 @@ reviews.post('/', authMiddleware, async (c) => {
     return c.json({ error: '评分需在 1-5 之间' }, 400)
   }
 
-  const existing = db
+  const existing = await db
     .prepare('SELECT id FROM reviews WHERE user_id=? AND game_id=?')
     .get(userId, gameId) as any
 
   if (existing) {
-    db.prepare('UPDATE reviews SET rating=?, content=?, created_at=? WHERE id=?').run(
+    await db.prepare('UPDATE reviews SET rating=?, content=?, created_at=? WHERE id=?').run(
       ratingNum,
       content ?? null,
       Date.now(),
@@ -110,7 +110,7 @@ reviews.post('/', authMiddleware, async (c) => {
   }
 
   const id = randomBytes(12).toString('hex')
-  db.prepare(
+  await db.prepare(
     'INSERT INTO reviews (id,user_id,game_id,rating,content,created_at) VALUES (?,?,?,?,?,?)',
   ).run(id, userId, gameId, ratingNum, content ?? null, Date.now())
   return c.json({ ok: true, id, upserted: false, review: selectReviewRow(id) }, 201)
@@ -120,7 +120,7 @@ reviews.post('/', authMiddleware, async (c) => {
 reviews.put('/:id', authMiddleware, async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
-  const row = db.prepare('SELECT user_id FROM reviews WHERE id=?').get(id) as any
+  const row = await db.prepare('SELECT user_id FROM reviews WHERE id=?').get(id) as any
   if (!row) return c.json({ error: '评论不存在' }, 404)
   if (row.user_id !== userId) return c.json({ error: '只能修改自己的评论' }, 403)
 
@@ -135,18 +135,18 @@ reviews.put('/:id', authMiddleware, async (c) => {
   if (ratingNum != null && (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5)) {
     return c.json({ error: '评分需在 1-5 之间' }, 400)
   }
-  db.prepare('UPDATE reviews SET rating=?, content=? WHERE id=?').run(ratingNum, content ?? null, id)
+  await db.prepare('UPDATE reviews SET rating=?, content=? WHERE id=?').run(ratingNum, content ?? null, id)
   return c.json({ ok: true, review: selectReviewRow(id) })
 })
 
 // ── 鉴权：删除自己的评论 ──────────────────────────────
-reviews.delete('/:id', authMiddleware, (c) => {
+reviews.delete('/:id', authMiddleware, async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
-  const row = db.prepare('SELECT user_id FROM reviews WHERE id=?').get(id) as any
+  const row = await db.prepare('SELECT user_id FROM reviews WHERE id=?').get(id) as any
   if (!row) return c.json({ error: '评论不存在' }, 404)
   if (row.user_id !== userId) return c.json({ error: '只能删除自己的评论' }, 403)
-  db.prepare('DELETE FROM reviews WHERE id=?').run(id)
+  await db.prepare('DELETE FROM reviews WHERE id=?').run(id)
   return c.json({ ok: true })
 })
 

@@ -89,7 +89,7 @@ export async function getAIRecommendation(
 /** 站内目录推荐（原有链路：需求结构化 → 候选集 → 选品 → 接地推荐语） */
 async function recommendFromCatalog(userMessage: string): Promise<AIResult> {
   const reqs: Requirement[] = await extractRequirements(userMessage)
-  const { ids: filteredIds, relaxed } = filterCatalog(reqs, 8)
+  const { ids: filteredIds, relaxed } = await filterCatalog(reqs, 8)
 
   // 有约束 → 严格限定在候选集；无约束（闲聊 / 正则与 LLM 都没抽到）→ 保持原有自由选品行为
   const hasConstraints = reqs.length > 0 && filteredIds.length > 0

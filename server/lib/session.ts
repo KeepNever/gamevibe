@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+import type { GameVibeDb } from '../db/driver.ts'
 import { randomBytes } from 'node:crypto'
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
@@ -32,24 +32,24 @@ export interface SessionRow {
   username?: string
 }
 
-export function createSession(
-  db: DatabaseSync,
+export async function createSession(
+  db: GameVibeDb,
   userId: string,
   ttlSeconds: number,
   ip?: string,
   ua?: string,
-): string {
+): Promise<string> {
   const id = randomBytes(18).toString('hex')
   const now = Date.now()
-  db.prepare(
+  await db.prepare(
     `INSERT INTO sessions (id, user_id, ip, ua, created_at, last_seen_at, expires_at, revoked_at)
      VALUES (?,?,?,?,?,?,?,NULL)`,
   ).run(id, userId, ip ?? null, (ua ?? '').slice(0, 300) || null, now, now, now + ttlSeconds * 1000)
   return id
 }
 
-export function getSession(db: DatabaseSync, sid: string): SessionRow | null {
-  const row = db
+export async function getSession(db: GameVibeDb, sid: string): Promise<SessionRow | null> {
+  const row = await db
     .prepare(
       `SELECT s.*, u.username AS username
          FROM sessions s
@@ -68,14 +68,14 @@ export function isSessionAlive(s: SessionRow | null): s is SessionRow {
 }
 
 /** 更新最后活跃时间（节流写入） */
-export function touchSession(db: DatabaseSync, s: SessionRow): void {
+export async function touchSession(db: GameVibeDb, s: SessionRow): Promise<void> {
   const now = Date.now()
   if (now - Number(s.last_seen_at) < TOUCH_INTERVAL_MS) return
-  db.prepare('UPDATE sessions SET last_seen_at=? WHERE id=?').run(now, s.id)
+  await db.prepare('UPDATE sessions SET last_seen_at=? WHERE id=?').run(now, s.id)
 }
 
-export function revokeSession(db: DatabaseSync, sid: string): void {
-  db.prepare('UPDATE sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(Date.now(), sid)
+export async function revokeSession(db: GameVibeDb, sid: string): Promise<void> {
+  await db.prepare('UPDATE sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(Date.now(), sid)
 }
 
 /**
@@ -83,24 +83,24 @@ export function revokeSession(db: DatabaseSync, sid: string): void {
  * exceptSid 用于「改密码后保留当前端，踢掉其它端」；
  * 不传则全踢（退出所有设备 / 注销账号）。
  */
-export function revokeAllSessions(db: DatabaseSync, userId: string, exceptSid?: string): number {
+export async function revokeAllSessions(db: GameVibeDb, userId: string, exceptSid?: string): Promise<number> {
   const now = Date.now()
   if (exceptSid) {
-    const r = db
+    const r = await db
       .prepare('UPDATE sessions SET revoked_at=? WHERE user_id=? AND id<>? AND revoked_at IS NULL')
       .run(now, userId, exceptSid)
     return Number(r.changes ?? 0)
   }
-  const r = db
+  const r = await db
     .prepare('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL')
     .run(now, userId)
   return Number(r.changes ?? 0)
 }
 
 /** 清理过期/已撤销超过 30 天的会话，避免表无限膨胀（启动时跑一次即可） */
-export function pruneSessions(db: DatabaseSync): void {
+export async function pruneSessions(db: GameVibeDb): Promise<void> {
   const cutoff = Date.now() - 30 * 24 * 3600 * 1000
-  db.prepare('DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)').run(
+  await db.prepare('DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)').run(
     Date.now(),
     cutoff,
   )
@@ -137,8 +137,8 @@ export function parseUa(ua: string | null): { device: string; os: string } {
   return { device, os }
 }
 
-export function listSessions(db: DatabaseSync, userId: string, currentSid?: string): SessionView[] {
-  const rows = db
+export async function listSessions(db: GameVibeDb, userId: string, currentSid?: string): Promise<SessionView[]> {
+  const rows = await db
     .prepare(
       `SELECT * FROM sessions
         WHERE user_id=? AND revoked_at IS NULL AND expires_at > ?

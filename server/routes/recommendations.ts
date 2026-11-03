@@ -20,13 +20,13 @@ function getOptionalUserId(c: any): string | null {
 }
 
 // 用户已交互的游戏集合（收藏/在玩/通关/评论）
-function getInteractedIds(userId: string): Set<string> {
-  const rows = db
+async function getInteractedIds(userId: string): Promise<Set<string>> {
+  const rows = await db
     .prepare(
       "SELECT external_id FROM user_library WHERE user_id=? AND status IN ('wishlist','playing','completed')",
     )
     .all(userId) as any[]
-  const rv = db.prepare('SELECT game_id FROM reviews WHERE user_id=?').all(userId) as any[]
+  const rv = await db.prepare('SELECT game_id FROM reviews WHERE user_id=?').all(userId) as any[]
   const set = new Set<string>()
   rows.forEach((r) => r.external_id && set.add(r.external_id))
   rv.forEach((r) => r.game_id && set.add(r.game_id))
@@ -36,14 +36,14 @@ function getInteractedIds(userId: string): Set<string> {
 // ── 以下两个函数为「无画像批次时的兜底」口径（genres/tags 加权），保持与原实现一致 ──
 
 // 构建兴趣画像：genres/tags -> 权重（通关权重最高，评分正向加成）
-function buildProfile(userId: string): Map<string, number> {
+async function buildProfile(userId: string): Promise<Map<string, number>> {
   const profile = new Map<string, number>()
-  const libRows = db
+  const libRows = await db
     .prepare(
       "SELECT external_id, status FROM user_library WHERE user_id=? AND status IN ('wishlist','playing','completed')",
     )
     .all(userId) as any[]
-  const reviewRows = db.prepare('SELECT game_id, rating FROM reviews WHERE user_id=?').all(userId) as any[]
+  const reviewRows = await db.prepare('SELECT game_id, rating FROM reviews WHERE user_id=?').all(userId) as any[]
   const weights: Record<string, number> = {}
   for (const r of libRows) {
     const w = r.status === 'completed' ? 2 : r.status === 'playing' ? 1.5 : 1
@@ -76,10 +76,10 @@ function topGenresTags(profile: Map<string, number>): { genres: string[]; tags: 
   return { genres, tags }
 }
 
-recommend.get('/', (c) => {
+recommend.get('/', async (c) => {
   const seed = c.req.query('seed')
   const userId = getOptionalUserId(c)
-  const interacted = userId ? getInteractedIds(userId) : new Set<string>()
+  const interacted = userId ? await getInteractedIds(userId) : new Set<string>()
 
   // —— 模式 A：基于某游戏的相似推荐（匿名可用，用于游戏详情「因为你玩过」）——
   if (seed) {
@@ -149,7 +149,7 @@ recommend.get('/', (c) => {
   }
 
   // ── 首选：画像驱动（读已冻结的游戏语义画像，排序在本地完成、理由为接地文案）──
-  const ranked = rankForUser(userId, 12)
+  const ranked = (await rankForUser(userId, 12))
   if (ranked && ranked.ranked.length) {
     const p = ranked.profile
     return c.json({
@@ -180,7 +180,7 @@ recommend.get('/', (c) => {
   }
 
   // ── 兜底：画像表缺失或未冻结 → 旧口径 genres/tags 加权 ──
-  const profile = buildProfile(userId)
+  const profile = (await buildProfile(userId))
   const { genres, tags } = topGenresTags(profile)
   const recs = catalog
     .filter((x) => !interacted.has(x.id))

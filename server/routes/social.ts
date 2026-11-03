@@ -26,15 +26,15 @@ social.post('/follow', authMiddleware, async (c) => {
   const targetId = body.userId
   if (!targetId || targetId === me) return c.json({ error: '无效目标' }, 400)
   // 检查目标用户存在
-  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId)
+  const target = await db.prepare('SELECT id FROM users WHERE id = ?').get(targetId)
   if (!target) return c.json({ error: '用户不存在' }, 404)
-  const existing = db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?').get(me, targetId)
+  const existing = await db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?').get(me, targetId)
   try {
-    db.prepare('INSERT OR IGNORE INTO follows (follower_id, following_id, created_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT OR IGNORE INTO follows (follower_id, following_id, created_at) VALUES (?, ?, ?)')
       .run(me, targetId, Date.now())
     // 新关注才生成通知（重复关注不刷屏）
     if (!existing) {
-      db.prepare(`INSERT INTO notifications (id, user_id, actor_id, type, ref_id, read, created_at)
+      await db.prepare(`INSERT INTO notifications (id, user_id, actor_id, type, ref_id, read, created_at)
                   VALUES (?, ?, ?, 'follow', ?, 0, ?)`)
         .run(randomBytes(12).toString('hex'), targetId, me, me, Date.now())
     }
@@ -45,19 +45,19 @@ social.post('/follow', authMiddleware, async (c) => {
 })
 
 /** 取消关注 */
-social.delete('/follow/:userId', authMiddleware, (c) => {
+social.delete('/follow/:userId', authMiddleware, async (c) => {
   const me = c.get('userId')
   const targetId = c.req.param('userId')
-  db.prepare('DELETE FROM follows WHERE follower_id = ? AND following_id = ?').run(me, targetId)
+  await db.prepare('DELETE FROM follows WHERE follower_id = ? AND following_id = ?').run(me, targetId)
   return c.json({ ok: true, following: false })
 })
 
 // ═══ 查询关注关系 ═══
 
 /** 我的关注列表 */
-social.get('/following/:userId', (c) => {
+social.get('/following/:userId', async (c) => {
   const userId = c.req.param('userId')
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar, f.created_at
       FROM follows f JOIN users u ON u.id = f.following_id
       WHERE f.follower_id = ?
@@ -67,9 +67,9 @@ social.get('/following/:userId', (c) => {
 })
 
 /** 我的粉丝列表 */
-social.get('/followers/:userId', (c) => {
+social.get('/followers/:userId', async (c) => {
   const userId = c.req.param('userId')
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar, f.created_at
       FROM follows f JOIN users u ON u.id = f.follower_id
       WHERE f.following_id = ?
@@ -86,7 +86,7 @@ social.post('/check', authMiddleware, async (c) => {
   const ids: string[] = body.userIds || []
   if (!ids.length) return c.json({ follows: {} })
   const placeholders = ids.map(() => '?').join(',')
-  const rows = db.prepare(
+  const rows = await db.prepare(
     `SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (${placeholders})`
   ).all(me, ...ids) as any[]
   const set = new Set(rows.map((r: any) => r.following_id))
@@ -97,12 +97,12 @@ social.post('/check', authMiddleware, async (c) => {
 
 // ═══ 好友动态流 ═══
 /** 获取我关注的用户的最近活动；未关注任何人时降级为全站发现流 */
-social.get('/feed', authMiddleware, (c) => {
+social.get('/feed', authMiddleware, async (c) => {
   const me = c.get('userId')
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') || '20', 10)))
 
   // 收集关注列表
-  const following = db.prepare(`SELECT following_id FROM follows WHERE follower_id = ?`).all(me) as any[]
+  const following = await db.prepare(`SELECT following_id FROM follows WHERE follower_id = ?`).all(me) as any[]
   const ids = following.map((f: any) => f.following_id)
   const discovery = ids.length === 0
 
@@ -111,14 +111,14 @@ social.get('/feed', authMiddleware, (c) => {
 
   if (discovery) {
     // 降级：展示全站最近动态（排除自己），让用户登录后就有内容可看
-    reviewRows = db.prepare(`
+    reviewRows = await db.prepare(`
       SELECT r.id, r.user_id, r.game_id, r.rating, r.content, r.created_at,
              u.username, u.display_name, u.avatar
       FROM reviews r JOIN users u ON u.id = r.user_id
       WHERE r.user_id != ?
       ORDER BY r.created_at DESC LIMIT ?
     `).all(me, limit) as any[]
-    libRows = db.prepare(`
+    libRows = await db.prepare(`
       SELECT l.id, l.user_id, l.name, l.status, l.added_at,
              u.username, u.display_name, l.external_id
       FROM user_library l JOIN users u ON u.id = l.user_id
@@ -127,14 +127,14 @@ social.get('/feed', authMiddleware, (c) => {
     `).all(me, Math.floor(limit / 2)) as any[]
   } else {
     const placeholders = ids.map(() => '?').join(',')
-    reviewRows = db.prepare(`
+    reviewRows = await db.prepare(`
       SELECT r.id, r.user_id, r.game_id, r.rating, r.content, r.created_at,
              u.username, u.display_name, u.avatar
       FROM reviews r JOIN users u ON u.id = r.user_id
       WHERE r.user_id IN (${placeholders})
       ORDER BY r.created_at DESC LIMIT ?
     `).all(...ids, limit) as any[]
-    libRows = db.prepare(`
+    libRows = await db.prepare(`
       SELECT l.id, l.user_id, l.name, l.status, l.added_at,
              u.username, u.display_name, l.external_id
       FROM user_library l JOIN users u ON u.id = l.user_id
@@ -182,7 +182,7 @@ social.get('/feed', authMiddleware, (c) => {
 
 // ═══ 推荐用户（活跃用户）═══
 /** 发现用户：按评论数+库存数排序的活跃用户 */
-social.get('/users', (c) => {
+social.get('/users', async (c) => {
   const limit = Math.min(20, Math.max(1, parseInt(c.req.query('limit') || '12', 10)))
   // 排除自己
   const excludeId = c.req.query('exclude') || ''
@@ -206,13 +206,13 @@ social.get('/users', (c) => {
   sql += ` ORDER BY (COALESCE(rc.cnt, 0) * 3 + COALESCE(lc.cnt, 1)) DESC LIMIT ?`
   params.push(limit)
 
-  const rows = db.prepare(sql).all(...params) as any[]
+  const rows = await db.prepare(sql).all(...params) as any[]
   // 对当前登录用户标注 isFollowing
   const currentUserId = optionalUserId(c)
   if (currentUserId && rows.length) {
     const ids = rows.map((r: any) => r.id)
     const ph = ids.map(() => '?').join(',')
-    const followed = db.prepare(
+    const followed = await db.prepare(
       `SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (${ph})`
     ).all(currentUserId, ...ids) as any[]
     const followedSet = new Set(followed.map((f: any) => f.following_id))
@@ -224,31 +224,31 @@ social.get('/users', (c) => {
 
 // ═══ 用户主页 ═══
 /** 用户资料：含统计、关注状态、他的评测与游戏库 */
-social.get('/users/:id', (c) => {
+social.get('/users/:id', async (c) => {
   const userId = c.req.param('id')
   const me = optionalUserId(c)
 
-  const user = db.prepare(`
+  const user = await db.prepare(`
     SELECT u.id, u.username, u.email, u.display_name, u.avatar, u.bio, u.created_at
     FROM users u WHERE u.id = ?
   `).get(userId) as any
   if (!user) return c.json({ error: '用户不存在' }, 404)
 
   // 统计
-  const followerCount = (db.prepare('SELECT COUNT(*) c FROM follows WHERE following_id = ?').get(userId) as any).c
-  const followingCount = (db.prepare('SELECT COUNT(*) c FROM follows WHERE follower_id = ?').get(userId) as any).c
-  const reviewCount = (db.prepare('SELECT COUNT(*) c FROM reviews WHERE user_id = ?').get(userId) as any).c
-  const libraryCount = (db.prepare('SELECT COUNT(*) c FROM user_library WHERE user_id = ?').get(userId) as any).c
+  const followerCount = (await db.prepare('SELECT COUNT(*) c FROM follows WHERE following_id = ?').get(userId) as any).c
+  const followingCount = (await db.prepare('SELECT COUNT(*) c FROM follows WHERE follower_id = ?').get(userId) as any).c
+  const reviewCount = (await db.prepare('SELECT COUNT(*) c FROM reviews WHERE user_id = ?').get(userId) as any).c
+  const libraryCount = (await db.prepare('SELECT COUNT(*) c FROM user_library WHERE user_id = ?').get(userId) as any).c
 
   // 当前用户是否关注 TA
   let isFollowing = false
   if (me && me !== userId) {
-    isFollowing = !!(db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?')
+    isFollowing = !!(await db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?')
       .get(me, userId))
   }
 
   // 他的评测（带游戏信息）
-  const reviews = (db.prepare(`
+  const reviews = (await db.prepare(`
     SELECT r.id, r.game_id, r.rating, r.content, r.created_at
     FROM reviews r WHERE r.user_id = ?
     ORDER BY r.created_at DESC LIMIT 20
@@ -261,7 +261,7 @@ social.get('/users/:id', (c) => {
   })
 
   // 他的游戏库
-  const library = (db.prepare(`
+  const library = (await db.prepare(`
     SELECT id, external_id, name, status, cover_url, added_at
     FROM user_library WHERE user_id = ?
     ORDER BY added_at DESC LIMIT 30
@@ -290,45 +290,45 @@ social.get('/users/:id', (c) => {
 
 // ═══ 通知 ═══
 /** 我的通知列表（含未读计数） */
-social.get('/notifications', authMiddleware, (c) => {
+social.get('/notifications', authMiddleware, async (c) => {
   const me = c.get('userId')
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') || '30', 10)))
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT n.id, n.type, n.ref_id, n.read, n.created_at,
            u.id AS actor_id, u.username, u.display_name, u.avatar
     FROM notifications n JOIN users u ON u.id = n.actor_id
     WHERE n.user_id = ?
     ORDER BY n.created_at DESC LIMIT ?
   `).all(me, limit) as any[]
-  const unread = (db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read = 0').get(me) as any).c
+  const unread = (await db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read = 0').get(me) as any).c
   return c.json({ notifications: rows, unread })
 })
 
 /** 标记单条已读 */
-social.post('/notifications/:id/read', authMiddleware, (c) => {
+social.post('/notifications/:id/read', authMiddleware, async (c) => {
   const me = c.get('userId')
   const id = c.req.param('id')
-  db.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?').run(id, me)
+  await db.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?').run(id, me)
   return c.json({ ok: true })
 })
 
 /** 全部已读 */
-social.post('/notifications/read-all', authMiddleware, (c) => {
+social.post('/notifications/read-all', authMiddleware, async (c) => {
   const me = c.get('userId')
-  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(me)
+  await db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(me)
   return c.json({ ok: true })
 })
 
 // ═══ 好友在玩 ═══
 /** 我关注的人里，库存里有这款游戏的好友列表 */
-social.get('/games/:gameId/friends', authMiddleware, (c) => {
+social.get('/games/:gameId/friends', authMiddleware, async (c) => {
   const me = c.get('userId')
   const gameId = c.req.param('gameId')
-  const following = db.prepare('SELECT following_id FROM follows WHERE follower_id = ?').all(me) as any[]
+  const following = await db.prepare('SELECT following_id FROM follows WHERE follower_id = ?').all(me) as any[]
   const ids = following.map((f: any) => f.following_id)
   if (!ids.length) return c.json({ friends: [], count: 0 })
   const ph = ids.map(() => '?').join(',')
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT u.id, u.display_name, u.avatar, l.status, l.added_at
     FROM user_library l JOIN users u ON u.id = l.user_id
     WHERE l.user_id IN (${ph}) AND l.external_id = ?

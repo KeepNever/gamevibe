@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { CREATE_TABLES } from './schema.ts'
 import { seedRbac } from './seedRbac.ts'
 import { runMigrations, SCHEMA_VERSION } from './migrations.ts'
+import { backend, initLocalDb, initTursoDb, localConn, type GameVibeDb } from './driver.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dataDir = join(__dirname, 'data')
@@ -77,21 +78,33 @@ function openDatabase(path: string): DatabaseSync {
   }
 }
 
-export const db: DatabaseSync = openDatabase(dbPath)
-db.exec(CREATE_TABLES)
+export const db: GameVibeDb =
+  backend === 'turso'
+    ? initTursoDb(process.env.TURSO_DATABASE_URL!, process.env.TURSO_AUTH_TOKEN!)
+    : initLocalDb(openDatabase(dbPath))
 
-// 版本化迁移：老库里历史遗留的「幂等 ALTER」由 migration 1 接管，
-// 新库则一次性建到位。失败直接抛错拒绝启动——带着半套结构跑起来更危险。
-const mig = runMigrations(db)
-if (mig.applied.length) {
-  console.log(`  🧱 数据库迁移：${mig.from} → ${mig.to}（执行 ${mig.applied.join(', ')}）`)
+if (backend === 'local') {
+  // 结构与种子只属于本地后端：Turso 的结构由 scripts/pushToTurso.mjs 推送，
+  // 远程库带着自己的 schema_migrations，重复跑迁移只会白慢启动。
+  await db.exec(CREATE_TABLES)
+
+  // 版本化迁移：老库里历史遗留的「幂等 ALTER」由 migration 1 接管，
+  // 新库则一次性建到位。失败直接抛错拒绝启动——带着半套结构跑起来更危险。
+  const mig = runMigrations(localConn!)
+  if (mig.applied.length) {
+    console.log(`  🧱 数据库迁移：${mig.from} → ${mig.to}（执行 ${mig.applied.join(', ')}）`)
+  } else {
+    console.log(`  🧱 数据库架构已是最新：v${SCHEMA_VERSION}`)
+  }
+
+  // RBAC 种子：角色 / 权限点 / 默认角色 / 首个管理员（幂等，每次启动都跑）
+  seedRbac(localConn!)
 } else {
-  console.log(`  🧱 数据库架构已是最新：v${SCHEMA_VERSION}`)
+  console.log(`  🧱 数据后端：Turso 远程库（${new URL(String(process.env.TURSO_DATABASE_URL).replace(/^libsql:\/\//, 'https://')).host}）`)
 }
 
-// RBAC 种子：角色 / 权限点 / 默认角色 / 首个管理员（幂等，每次启动都跑）
-seedRbac(db)
-
+/** 兼容旧导出：运行时统一走 GameVibeDb；本地连接在 localConn 上 */
 export function getDb(): DatabaseSync {
-  return db
+  if (!localConn) throw new Error('getDb() 只在本地后端可用')
+  return localConn
 }

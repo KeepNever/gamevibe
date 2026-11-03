@@ -55,26 +55,26 @@ function rowToUser(row: any): User {
  * 建立登录态：写 sessions → 签带 sid 的 JWT → 下发 httpOnly Cookie。
  * 响应体里仍带 token 字段（脚本与旧客户端兼容），但前端已改为不落 localStorage。
  */
-function establishSession(
+async function establishSession(
   c: any,
   row: any,
   ttl: number,
-): { token: string; sid: string } {
+): Promise<{ token: string; sid: string }> {
   const ip = clientIp(c)
   const ua = c.req.header('user-agent')
-  const sid = createSession(db, String(row.id), ttl, ip, ua)
+  const sid = await createSession(db, String(row.id), ttl, ip, ua)
   const token = signToken({ sub: String(row.id), username: String(row.username), sid }, ttl)
   setSessionCookie(c, token, ttl)
   return { token, sid }
 }
 
 /** 组装登录态：用户 + 角色 + 权限点，前端据此控制菜单与按钮 */
-function sessionPayload(row: any) {
-  const roles = getUserRoles(String(row.id))
+async function sessionPayload(row: any) {
+  const roles = (await getUserRoles(String(row.id)))
   return {
     user: rowToUser(row),
     roles: roles.map((r) => ({ key: r.key, name: r.name, level: r.level })),
-    permissions: getUserPermissions(String(row.id)),
+    permissions: await getUserPermissions(String(row.id)),
   }
 }
 
@@ -89,16 +89,16 @@ function sha256(s: string): string {
 }
 
 /** 统计窗口内该邮箱的失败次数 */
-function recentFails(email: string): number {
+async function recentFails(email: string): Promise<number> {
   const since = Date.now() - LOGIN_WINDOW_MS
-  const row = db
+  const row = await db
     .prepare('SELECT COUNT(*) AS c FROM login_attempts WHERE email = ? AND success = 0 AND created_at > ?')
     .get(email, since) as unknown as { c: number }
   return row?.c ?? 0
 }
 
-function recordAttempt(email: string, ip: string | undefined, success: boolean): void {
-  db.prepare('INSERT INTO login_attempts (email, ip, success, created_at) VALUES (?, ?, ?, ?)').run(
+async function recordAttempt(email: string, ip: string | undefined, success: boolean): Promise<void> {
+  await db.prepare('INSERT INTO login_attempts (email, ip, success, created_at) VALUES (?, ?, ?, ?)').run(
     email,
     ip ?? null,
     success ? 1 : 0,
@@ -106,7 +106,7 @@ function recordAttempt(email: string, ip: string | undefined, success: boolean):
   )
   // 成功登录后清掉该邮箱的失败记录，避免影响下次
   if (success) {
-    db.prepare('DELETE FROM login_attempts WHERE email = ? AND success = 0').run(email)
+    await db.prepare('DELETE FROM login_attempts WHERE email = ? AND success = 0').run(email)
   }
 }
 
@@ -134,7 +134,7 @@ auth.post('/register', async (c) => {
   const pwdErr = checkPasswordStrength(password)
   if (pwdErr) return c.json({ error: pwdErr }, 400)
 
-  const exist = db.prepare('SELECT id FROM users WHERE username=? OR email=?').get(uname, email.trim())
+  const exist = await db.prepare('SELECT id FROM users WHERE username=? OR email=?').get(uname, email.trim())
   if (exist) {
     // 不泄露是用户名还是邮箱已被占用（防枚举）
     return c.json({ error: '账号已存在' }, 409)
@@ -142,7 +142,7 @@ auth.post('/register', async (c) => {
 
   const { hash, salt } = hashPassword(password)
   const id = randomBytes(12).toString('hex')
-  db.prepare(
+  await db.prepare(
     `INSERT INTO users (id, username, email, password_hash, salt, display_name, status, created_at)
      VALUES (?,?,?,?,?,?,'active',?)`,
   ).run(id, uname, email.trim(), hash, salt, uname, Date.now())
@@ -150,9 +150,9 @@ auth.post('/register', async (c) => {
   // 新用户一律分配普通用户角色（RBAC 的入口）
   assignRole(id, 'user', 'register')
 
-  const row = db.prepare('SELECT * FROM users WHERE id=?').get(id)!
+  const row = await db.prepare('SELECT * FROM users WHERE id=?').get(id)!
   const ttl = remember ? SESSION_REMEMBER : SESSION_DEFAULT
-  const { token, sid } = establishSession(c, row, ttl)
+  const { token, sid } = await establishSession(c, row, ttl)
   writeAudit(db, c, {
     actorId: id,
     actorName: uname,
@@ -160,7 +160,7 @@ auth.post('/register', async (c) => {
     targetId: id,
     detail: `新账号注册：${uname}`,
   })
-  return c.json({ token, sessionId: sid, expiresIn: ttl, ...sessionPayload(row) }, 201)
+  return c.json({ token, sessionId: sid, expiresIn: ttl, ...(await sessionPayload(row)) }, 201)
 })
 
 // ══ 登录 ══════════════════════════════════════════════
@@ -179,7 +179,7 @@ auth.post('/login', async (c) => {
   const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip')
 
   // 账号级锁定：窗口内失败达上限直接拒绝，挡住慢速撞库
-  if (recentFails(addr) >= LOGIN_MAX_FAILS) {
+  if ((await recentFails(addr)) >= LOGIN_MAX_FAILS) {
     const mins = Math.ceil(LOGIN_WINDOW_MS / 60000)
     return c.json(
       { error: `尝试次数过多，请 ${mins} 分钟后再试`, code: 'TOO_MANY_ATTEMPTS' },
@@ -187,7 +187,7 @@ auth.post('/login', async (c) => {
     )
   }
 
-  const row = db.prepare('SELECT * FROM users WHERE email=?').get(addr) as any
+  const row = await db.prepare('SELECT * FROM users WHERE email=?').get(addr) as any
   if (!row) {
     recordAttempt(addr, ip, false)
     writeAudit(db, c, {
@@ -220,7 +220,7 @@ auth.post('/login', async (c) => {
       detail: { reason: '密码错误' },
       result: 'fail',
     })
-    const left = LOGIN_MAX_FAILS - recentFails(addr)
+    const left = LOGIN_MAX_FAILS - (await recentFails(addr))
     // 提示剩余次数：只在快锁定时提醒，避免变成试探工具
     return c.json({ error: '邮箱或密码错误', remaining: left > 0 ? left : 0 }, 401)
   }
@@ -229,7 +229,7 @@ auth.post('/login', async (c) => {
   ensureUserRole(String(row.id)) // 兜底：历史账号若无角色则补默认角色
 
   const ttl = remember ? SESSION_REMEMBER : SESSION_DEFAULT
-  const { token, sid } = establishSession(c, row, ttl)
+  const { token, sid } = await establishSession(c, row, ttl)
   writeAudit(db, c, {
     actorId: String(row.id),
     actorName: String(row.username),
@@ -237,7 +237,7 @@ auth.post('/login', async (c) => {
     targetId: String(row.id),
     detail: remember ? '记住我 · 30 天' : '常规登录 · 7 天',
   })
-  return c.json({ token, sessionId: sid, expiresIn: ttl, ...sessionPayload(row) })
+  return c.json({ token, sessionId: sid, expiresIn: ttl, ...(await sessionPayload(row)) })
 })
 
 // ══ 退出登录 ══════════════════════════════════════════
@@ -263,13 +263,13 @@ auth.post('/logout', optionalAuth, (c) => {
 // 用可选鉴权：匿名访问返回 200 + authenticated:false，而不是 401。
 // 迁移到 httpOnly Cookie 后前端看不到令牌，刷新页面只能盲调一次这个接口，
 // 如果匿名也报 401，每个访客的控制台都会多一条红色错误，且容易被误判成「会话失效」。
-auth.get('/me', optionalAuth, (c) => {
+auth.get('/me', optionalAuth, async (c) => {
   const userId = c.get('userId')
   if (!userId) return c.json({ authenticated: false, user: null, roles: [], permissions: [] })
-  const row = db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any
+  const row = await db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any
   if (!row) return c.json({ authenticated: false, user: null, roles: [], permissions: [] })
   if (row.status === 'disabled') return c.json({ error: '账号已被停用' }, 403)
-  return c.json({ authenticated: true, ...sessionPayload(row) })
+  return c.json({ authenticated: true, ...(await sessionPayload(row)) })
 })
 
 // ══ 忘记密码 ══════════════════════════════════════════
@@ -283,7 +283,7 @@ auth.post('/forgot-password', async (c) => {
   const email = String(body?.email || '').trim()
   if (!email) return c.json({ error: '请填写邮箱' }, 400)
 
-  const row = db.prepare('SELECT id, email FROM users WHERE email=?').get(email) as any
+  const row = await db.prepare('SELECT id, email FROM users WHERE email=?').get(email) as any
   const origin = c.req.header('origin') || ''
 
   // 邮箱不存在：不生成令牌，但也不直接叫破（真实发信模式下应完全一致地返回成功）
@@ -300,7 +300,7 @@ auth.post('/forgot-password', async (c) => {
 
   const raw = randomBytes(32).toString('hex')
   const now = Date.now()
-  db.prepare(
+  await db.prepare(
     'INSERT INTO password_resets (id, user_id, token_hash, expires_at, used_at, created_at) VALUES (?,?,?,?,NULL,?)',
   ).run(randomBytes(8).toString('hex'), row.id, sha256(raw), now + RESET_TTL_MS, now)
 
@@ -361,7 +361,7 @@ auth.post('/reset-password', async (c) => {
   const pwdErr = checkPasswordStrength(password)
   if (pwdErr) return c.json({ error: pwdErr }, 400)
 
-  const rec = db
+  const rec = await db
     .prepare('SELECT * FROM password_resets WHERE token_hash=? AND used_at IS NULL')
     .get(sha256(token)) as any
   if (!rec) return c.json({ error: '重置链接无效或已使用' }, 400)
@@ -370,7 +370,7 @@ auth.post('/reset-password', async (c) => {
   const { hash, salt } = hashPassword(password)
   const now = Date.now()
   // password_changed_at 是「旧令牌一刀切」的锚点：改密前签发的令牌（含无 sid 的老令牌）全部失效
-  db.prepare('UPDATE users SET password_hash=?, salt=?, password_changed_at=?, updated_at=? WHERE id=?').run(
+  await db.prepare('UPDATE users SET password_hash=?, salt=?, password_changed_at=?, updated_at=? WHERE id=?').run(
     hash,
     salt,
     now,
@@ -380,16 +380,16 @@ auth.post('/reset-password', async (c) => {
   // 会话表也得撤：sid 未过期的会话若不撤销，旧设备照样能用
   revokeAllSessions(db, String(rec.user_id))
   // 令牌一次性使用；同用户其余未用令牌一并作废
-  db.prepare('UPDATE password_resets SET used_at=? WHERE user_id=? AND used_at IS NULL').run(
+  await db.prepare('UPDATE password_resets SET used_at=? WHERE user_id=? AND used_at IS NULL').run(
     Date.now(),
     rec.user_id,
   )
   // 重置成功后清空失败计数，避免旧锁定挡住正常登录
-  db.prepare('DELETE FROM login_attempts WHERE email = (SELECT email FROM users WHERE id=?)').run(
+  await db.prepare('DELETE FROM login_attempts WHERE email = (SELECT email FROM users WHERE id=?)').run(
     rec.user_id,
   )
 
-  const owner = db.prepare('SELECT username FROM users WHERE id=?').get(rec.user_id) as
+  const owner = await db.prepare('SELECT username FROM users WHERE id=?').get(rec.user_id) as
     | { username: string }
     | undefined
   writeAudit(db, c, {

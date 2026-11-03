@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { env } from './env.ts'
 import { db } from './db/index.ts'
+import { backend as dbBackend } from './db/driver.ts'
 import auth from './routes/auth.ts'
 import library from './routes/library.ts'
 import collections from './routes/collections.ts'
@@ -209,8 +210,8 @@ app.notFound((c) => c.json({ error: '\u8d44\u6e90\u4e0d\u5b58\u5728' }, 404))
 
 // 首次启动自动灌入演示数据（users 为空时才执行；seed 内部 INSERT OR IGNORE 幂等）
 try {
-  const u = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }
-  if (u.c === 0) {
+  const u = await db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }
+  if (dbBackend === 'local' && u.c === 0) {
     const seedPath = fileURLToPath(new URL('../scripts/seedSocial.mjs', import.meta.url))
     console.log('  🌱 首次启动，自动灌入演示数据…')
     execFileSync(process.execPath, [seedPath], { stdio: 'ignore', env: process.env })

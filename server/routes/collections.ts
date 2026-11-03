@@ -34,12 +34,12 @@ function mapItem(row: any): UserLibraryItem {
   }
 }
 
-collections.get('/:kind', (c) => {
+collections.get('/:kind', async (c) => {
   const userId = c.get('userId')
   const kind = c.req.param('kind')
 
   if (kind === 'recent') {
-    const rows = db
+    const rows = await db
       .prepare('SELECT game_id FROM user_recent WHERE user_id=? ORDER BY viewed_at DESC LIMIT 20')
       .all(userId)
     return c.json({ items: rows.map((r: any) => r.game_id) })
@@ -47,7 +47,7 @@ collections.get('/:kind', (c) => {
 
   const status = STATUS_MAP[kind]
   if (!status) return c.json({ error: '未知集合类型' }, 400)
-  const rows = db.prepare('SELECT * FROM user_library WHERE user_id=? AND status=?').all(userId, status)
+  const rows = await db.prepare('SELECT * FROM user_library WHERE user_id=? AND status=?').all(userId, status)
   return c.json({ items: rows.map(mapItem) })
 })
 
@@ -64,7 +64,7 @@ collections.post('/:kind', async (c) => {
   if (!gameId) return c.json({ error: '缺少 gameId' }, 400)
 
   if (kind === 'recent') {
-    db.prepare('INSERT OR REPLACE INTO user_recent (user_id, game_id, viewed_at) VALUES (?,?,?)').run(
+    await db.prepare('INSERT OR REPLACE INTO user_recent (user_id, game_id, viewed_at) VALUES (?,?,?)').run(
       userId,
       gameId,
       Date.now(),
@@ -75,9 +75,9 @@ collections.post('/:kind', async (c) => {
   const status = STATUS_MAP[kind]
   if (!status) return c.json({ error: '未知集合类型' }, 400)
 
-  const exist = db.prepare('SELECT id FROM user_library WHERE user_id=? AND external_id=?').get(userId, gameId)
+  const exist = await db.prepare('SELECT id FROM user_library WHERE user_id=? AND external_id=?').get(userId, gameId)
   if (exist) {
-    db.prepare('UPDATE user_library SET status=?, name=COALESCE(?,name), cover_url=COALESCE(?,cover_url) WHERE id=?').run(
+    await db.prepare('UPDATE user_library SET status=?, name=COALESCE(?,name), cover_url=COALESCE(?,cover_url) WHERE id=?').run(
       status,
       body.name || null,
       body.coverUrl || null,
@@ -85,7 +85,7 @@ collections.post('/:kind', async (c) => {
     )
   } else {
     const id = randomBytes(12).toString('hex')
-    db.prepare(
+    await db.prepare(
       'INSERT INTO user_library (id,user_id,source,external_id,name,cover_url,status,added_at) VALUES (?,?,?,?,?,?,?,?)',
     ).run(id, userId, 'catalog', gameId, body.name || gameId, body.coverUrl || null, status, Date.now())
   }
@@ -103,12 +103,12 @@ collections.delete('/:kind', async (c) => {
   }
   const gameId = body?.gameId
   if (kind === 'recent') {
-    db.prepare('DELETE FROM user_recent WHERE user_id=? AND game_id=?').run(userId, gameId)
+    await db.prepare('DELETE FROM user_recent WHERE user_id=? AND game_id=?').run(userId, gameId)
     return c.json({ ok: true })
   }
   const status = STATUS_MAP[kind]
   if (!status) return c.json({ error: '未知集合类型' }, 400)
-  db.prepare('DELETE FROM user_library WHERE user_id=? AND external_id=? AND status=?').run(userId, gameId, status)
+  await db.prepare('DELETE FROM user_library WHERE user_id=? AND external_id=? AND status=?').run(userId, gameId, status)
   return c.json({ ok: true })
 })
 

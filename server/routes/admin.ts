@@ -18,7 +18,7 @@ function paging(c: any): { page: number; size: number; offset: number } {
 }
 
 // ══ 用户列表 ══════════════════════════════════════════
-admin.get('/users', requirePermission('user.read'), (c) => {
+admin.get('/users', requirePermission('user.read'), async (c) => {
   const q = String(c.req.query('q') || '').trim()
   const { page, size, offset } = paging(c)
   const like = `%${q}%`
@@ -27,10 +27,10 @@ admin.get('/users', requirePermission('user.read'), (c) => {
   const args = q ? [like, like, like] : []
 
   const total = (
-    db.prepare(`SELECT COUNT(*) AS c FROM users ${where}`).get(...args) as unknown as { c: number }
+    await db.prepare(`SELECT COUNT(*) AS c FROM users ${where}`).get(...args) as unknown as { c: number }
   ).c
 
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT id, username, email, display_name, avatar, status, created_at
          FROM users ${where}
@@ -39,20 +39,22 @@ admin.get('/users', requirePermission('user.read'), (c) => {
     )
     .all(...args, size, offset) as unknown as any[]
 
-  const users = rows.map((r) => ({
-    ...r,
-    roles: getUserRoles(r.id).map((x) => x.key),
-  }))
+  const users = await Promise.all(
+    rows.map(async (r) => ({
+      ...r,
+      roles: (await getUserRoles(r.id)).map((x) => x.key),
+    })),
+  )
 
   return c.json({ users, total, page, pageSize: size })
 })
 
 // ══ 角色与权限点清单（后台展示用）══════════════════════
-admin.get('/roles', requirePermission('admin.access'), (c) => {
-  const perms = db
+admin.get('/roles', requirePermission('admin.access'), async (c) => {
+  const perms = await db
     .prepare('SELECT key, name, group_name, description FROM permissions ORDER BY group_name, key')
     .all()
-  return c.json({ roles: listRoles(), permissions: perms })
+  return c.json({ roles: await listRoles(), permissions: perms })
 })
 
 // ══ 调整角色 ══════════════════════════════════════════
@@ -69,17 +71,17 @@ admin.patch('/users/:id/role', requirePermission('user.manage'), async (c) => {
     return c.json({ error: '不能修改自己的角色' }, 400)
   }
 
-  const target = db.prepare('SELECT id, username FROM users WHERE id=?').get(targetId) as any
+  const target = await db.prepare('SELECT id, username FROM users WHERE id=?').get(targetId) as any
   if (!target) return c.json({ error: '用户不存在' }, 404)
 
   // 不能操作与自己同级或更高权限的人（防止管理员互相降级）
-  const myLevel = getMaxLevel(me)
-  const targetLevel = getMaxLevel(targetId)
+  const myLevel = await getMaxLevel(me)
+  const targetLevel = await getMaxLevel(targetId)
   if (targetLevel >= myLevel) {
     return c.json({ error: '不能修改同级或更高权限的用户' }, 403)
   }
   const roleId = (
-    db.prepare('SELECT id, level FROM roles WHERE key=?').get(roleKey) as unknown as {
+    await db.prepare('SELECT id, level FROM roles WHERE key=?').get(roleKey) as unknown as {
       id: string
       level: number
     }
@@ -88,9 +90,9 @@ admin.patch('/users/:id/role', requirePermission('user.manage'), async (c) => {
   if (roleId >= myLevel) return c.json({ error: '不能授予与自己同级或更高的角色' }, 403)
 
   // 单人单角色：先清空再赋新角色（保持模型简单可解释）
-  const before = getUserRoles(targetId).map((r) => r.key)
-  for (const r of getUserRoles(targetId)) revokeRole(targetId, r.key)
-  assignRole(targetId, roleKey, me)
+  const before = (await getUserRoles(targetId)).map((r) => r.key)
+  for (const r of await getUserRoles(targetId)) await revokeRole(targetId, r.key)
+  await assignRole(targetId, roleKey, me)
 
   writeAudit(db, c, {
     actorId: me,
@@ -114,14 +116,14 @@ admin.patch('/users/:id/status', requirePermission('user.manage'), async (c) => 
   if (!['active', 'disabled'].includes(status)) return c.json({ error: '状态不合法' }, 400)
   if (targetId === me) return c.json({ error: '不能停用自己的账号' }, 400)
 
-  const target = db.prepare('SELECT id, username, status FROM users WHERE id=?').get(targetId) as any
+  const target = await db.prepare('SELECT id, username, status FROM users WHERE id=?').get(targetId) as any
   if (!target) return c.json({ error: '用户不存在' }, 404)
 
   if (getMaxLevel(targetId) >= getMaxLevel(me)) {
     return c.json({ error: '不能操作同级或更高权限的用户' }, 403)
   }
 
-  db.prepare('UPDATE users SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), targetId)
+  await db.prepare('UPDATE users SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), targetId)
 
   writeAudit(db, c, {
     actorId: me,
@@ -151,19 +153,19 @@ admin.get('/audit', requirePermission('admin.access'), (c) => {
 })
 
 // ══ 概览统计 ══════════════════════════════════════════
-admin.get('/overview', requirePermission('admin.access'), (c) => {
-  const users = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as unknown as { c: number }).c
+admin.get('/overview', requirePermission('admin.access'), async (c) => {
+  const users = (await db.prepare('SELECT COUNT(*) AS c FROM users').get() as unknown as { c: number }).c
   const disabled = (
-    db.prepare("SELECT COUNT(*) AS c FROM users WHERE status='disabled'").get() as unknown as {
+    await db.prepare("SELECT COUNT(*) AS c FROM users WHERE status='disabled'").get() as unknown as {
       c: number
     }
   ).c
   const admins = (
-    db.prepare(
+    await db.prepare(
       "SELECT COUNT(*) AS c FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE r.key='admin'",
     ).get() as unknown as { c: number }
   ).c
-  const reviews = (db.prepare('SELECT COUNT(*) AS c FROM reviews').get() as unknown as { c: number }).c
+  const reviews = (await db.prepare('SELECT COUNT(*) AS c FROM reviews').get() as unknown as { c: number }).c
   return c.json({ users, disabled, admins, reviews })
 })
 

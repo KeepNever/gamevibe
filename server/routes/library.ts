@@ -50,7 +50,7 @@ lib.post('/import', async (c) => {
   let inserted = 0
   for (const it of items) {
     const id = randomBytes(12).toString('hex')
-    db.prepare(
+    await db.prepare(
       `INSERT INTO user_library (id,user_id,source,external_id,name,cover_url,install_path,size_bytes,last_played,status,added_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
@@ -72,9 +72,9 @@ lib.post('/import', async (c) => {
 })
 
 // 列出用户库
-lib.get('/', (c) => {
+lib.get('/', async (c) => {
   const userId = c.get('userId')
-  const rows = db.prepare('SELECT * FROM user_library WHERE user_id=? ORDER BY added_at DESC').all(userId)
+  const rows = await db.prepare('SELECT * FROM user_library WHERE user_id=? ORDER BY added_at DESC').all(userId)
   return c.json({ items: rows.map(mapItem) })
 })
 
@@ -99,14 +99,14 @@ lib.put('/:id', async (c) => {
   }
   if (sets.length === 0) return c.json({ error: '无更新字段' }, 400)
   vals.push(id, userId)
-  db.prepare(`UPDATE user_library SET ${sets.join(',')} WHERE id=? AND user_id=?`).run(...vals)
+  await db.prepare(`UPDATE user_library SET ${sets.join(',')} WHERE id=? AND user_id=?`).run(...vals)
   return c.json({ ok: true })
 })
 
-lib.delete('/:id', (c) => {
+lib.delete('/:id', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
-  db.prepare('DELETE FROM user_library WHERE id=? AND user_id=?').run(id, userId)
+  await db.prepare('DELETE FROM user_library WHERE id=? AND user_id=?').run(id, userId)
   return c.json({ ok: true })
 })
 
