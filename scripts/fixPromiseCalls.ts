@@ -24,7 +24,9 @@ function parseErrors(raw: string): Err[] {
   let m: RegExpExecArray | null
   while ((m = re.exec(raw))) {
     const [, file, line, col, code, msg] = m
-    if (file.startsWith('scripts/')) continue
+    // 默认跳过 scripts/（eval 脚本要修时设 INCLUDE_SCRIPTS=1）
+    if (file.startsWith('scripts/') && process.env.INCLUDE_SCRIPTS !== '1') continue
+    if (file === 'scripts/fixPromiseCalls.ts') continue
     if (!['TS2339', 'TS2345', 'TS2367', 'TS2769'].includes(code)) continue
     if (!/Promise</.test(msg)) continue
     out.push({ file, line: +line, col: +col, code, msg })
@@ -71,7 +73,8 @@ function fixFile(file: string, errs: Err[]): number {
 
   for (const e of errs) {
     const pos = ts.getPositionOfLineAndCharacter(sf, e.line - 1, e.col - 1)
-    const token = ts.getTouchingToken(sf, pos)
+    // getTouchingToken 在部分版本的类型定义里未导出，运行时是存在的
+    const token = (ts as any).getTouchingToken(sf, pos) as ts.Node
 
     let anc: ts.Node | undefined = token
     let inAwait = false
@@ -124,7 +127,8 @@ for (let round = 1; round <= 6; round++) {
   }
   let total = 0
   for (const [file, list] of byFile) {
-    if (!RUNTIME.includes(file)) continue
+    const SCOPES = process.env.INCLUDE_SCRIPTS === '1' ? [...RUNTIME, 'scripts/evalAI.ts', 'scripts/evalConstraints.ts'] : RUNTIME
+  if (!SCOPES.includes(file)) continue
     total += fixFile(file, list)
   }
   console.log(`第 ${round} 轮：修 ${total} 处`)
@@ -132,5 +136,5 @@ for (let round = 1; round <= 6; round++) {
     for (const e of errs.slice(0, 8)) console.log(`  ${e.file}(${e.line},${e.col}) ${e.code} ${e.msg.slice(0, 90)}`)
     break }
   // async 化新产生的 await
-  execSync(`/d/node.js/node.exe --experimental-strip-types --no-warnings scripts/codemodAsyncOnce.ts ${RUNTIME.join(' ')}`, { stdio: 'inherit' })
+  execSync(`/d/node.js/node.exe --experimental-strip-types --no-warnings scripts/codemodAsyncOnce.ts ${(process.env.INCLUDE_SCRIPTS === '1' ? [...RUNTIME, 'scripts/evalAI.ts', 'scripts/evalConstraints.ts'] : RUNTIME).join(' ')}`, { stdio: 'inherit' })
 }

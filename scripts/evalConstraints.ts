@@ -29,7 +29,7 @@ interface EvalCase {
   hard: HardCond[]
 }
 
-function loadProfiles(): Map<string, any> {
+async function loadProfiles(): Promise<Map<string, any>> {
   const map = new Map<string, any>()
   try {
     const b = await db
@@ -92,7 +92,7 @@ async function main() {
     .filter(Boolean)
     .map((l) => JSON.parse(l))
 
-  const profiles = loadProfiles()
+  const profiles = (await loadProfiles())
   console.log(`硬约束层自检 · ${cases.length} 条 · 画像覆盖 ${profiles.size}\n`)
 
   let pass = 0
@@ -102,7 +102,7 @@ async function main() {
 
   for (const c of cases) {
     const reqs = extractByRules(c.query)
-    const { ids, relaxed } = filterCatalog(reqs, 8)
+    const { ids, relaxed } = await filterCatalog(reqs, 8)
     console.log(`· ${c.id} ${c.query}`)
     console.log(`  抽取：${reqs.map((r: Requirement) => r.label).join(' / ') || '（无硬约束）'}`)
     console.log(`  候选：${ids.join(', ') || '（空）'}${relaxed.length ? `  放宽：${relaxed.map((r) => r.label).join(',')}` : ''}`)

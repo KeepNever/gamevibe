@@ -46,7 +46,7 @@ interface GameProfileRow {
   estimated_length: string
 }
 
-function loadProfiles(): Map<string, GameProfileRow> {
+async function loadProfiles(): Promise<Map<string, GameProfileRow>> {
   const map = new Map<string, GameProfileRow>()
   try {
     const b = await db.prepare("SELECT batch_id FROM profile_batches WHERE is_active=1 AND status='frozen' ORDER BY created_at DESC LIMIT 1").get() as any
@@ -138,7 +138,7 @@ async function main() {
     .filter(Boolean)
     .map((l) => JSON.parse(l))
 
-  const profiles = loadProfiles()
+  const profiles = (await loadProfiles())
   console.log(`评测集 ${cases.length} 条 · 画像覆盖 ${profiles.size} 款 · 标签=${LABEL}`)
 
   // 用临时评测账号（避免污染演示账号的聊天记录）
@@ -220,7 +220,7 @@ async function main() {
   out.push(`- 时间：${new Date().toISOString()}`)
   out.push(`- 评测集：\`eval/queries.jsonl\`（${n} 条）`)
   out.push(`- 链路：\`POST /api/ai/chat\`（真实 LLM，含接地两遍式）`)
-  out.push(`- 画像批次：${profiles.size ? [...db.prepare("SELECT batch_id FROM profile_batches WHERE is_active=1").all()].map((r: any) => r.batch_id).join(',') : '无'}`)
+  out.push(`- 画像批次：${profiles.size ? [...(await db.prepare("SELECT batch_id FROM profile_batches WHERE is_active=1").all())].map((r: any) => r.batch_id).join(',') : '无'}`)
   out.push('')
   out.push('## 汇总')
   out.push('')
